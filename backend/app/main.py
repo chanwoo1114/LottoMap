@@ -1,5 +1,16 @@
-from fastapi import FastAPI
+import logging
+import time
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import stores
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("api")
 
 app = FastAPI(
     title="복권지도 API",
@@ -14,6 +25,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed = (time.perf_counter() - start) * 1000
+        logger.exception(f"{request.method} {request.url.path} -> 500 ({elapsed:.1f}ms)")
+        raise
+    elapsed = (time.perf_counter() - start) * 1000
+    logger.info(f"{request.method} {request.url.path} -> {response.status_code} ({elapsed:.1f}ms)")
+    return response
+
+
+app.include_router(stores.router)
+
 
 @app.get("/health")
 async def health():

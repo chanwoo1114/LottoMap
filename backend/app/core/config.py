@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
 
     DHLOTTERY_URL: str = "https://www.dhlottery.co.kr"
-    CRAWL_REQUEST_DELAY: float = random.uniform(5, 10)
 
     @property
     def DATABASE_URL(self) -> str:
