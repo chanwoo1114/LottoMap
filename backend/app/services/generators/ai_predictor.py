@@ -1,4 +1,3 @@
-"""고도화 AI 로또 번호 생성기 v3 (asyncpg) - 7모델 앙상블 + 몬테카를로"""
 import math
 import random
 from collections import Counter, defaultdict

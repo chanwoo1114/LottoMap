@@ -1,8 +1,17 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
 CREATE TABLE stores (
     id                  SERIAL PRIMARY KEY,
-    store_id            VARCHAR(20) UNIQUE DEFAULT '',
+    store_id            VARCHAR(20) UNIQUE NOT NULL,
     name                VARCHAR(100) NOT NULL,
     address             VARCHAR(255) NOT NULL,
     address_detail      VARCHAR(255) DEFAULT '',
@@ -24,6 +33,10 @@ CREATE TABLE stores (
 CREATE INDEX ix_stores_location ON stores USING GIST (location);
 CREATE INDEX ix_stores_sido_sigungu ON stores (sido, sigungu);
 CREATE INDEX ix_stores_active ON stores (is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER trg_stores_updated_at
+    BEFORE UPDATE ON stores
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMENT ON TABLE stores IS '전국 복권 판매점 정보';
 COMMENT ON COLUMN stores.id IS '판매점 고유 ID (PK)';
@@ -116,6 +129,10 @@ CREATE TABLE speetto_games (
 );
 
 CREATE INDEX ix_speetto_type ON speetto_games (game_type);
+
+CREATE TRIGGER trg_speetto_games_updated_at
+    BEFORE UPDATE ON speetto_games
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMENT ON TABLE speetto_games IS '스피또(500/1000/2000) 회차별 발행·잔여 현황';
 COMMENT ON COLUMN speetto_games.id IS 'PK';

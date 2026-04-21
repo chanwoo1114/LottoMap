@@ -4,7 +4,9 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import stores
+from app.api import (
+    stores, generator,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +44,7 @@ async def log_requests(request: Request, call_next):
 
 
 app.include_router(stores.router)
+app.include_router(generator.router)
 
 
 @app.get("/health")
