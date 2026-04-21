@@ -18,6 +18,7 @@ class NearbyStoreQuery(BaseModel):
     lon: float = Field(..., ge=-180, le=180, description="경도 (EPSG:4326)")
     radius_m: int = Field(1000, ge=1, le= 5000, description="반경(m), 기본 1km, 최대 5km")
 
+
 class StoreResponse(BaseModel):
     id: int = Field(description="판매점 고유 ID")
     store_id: str = Field(description="동행복권 기준 판매점 고유번호")
@@ -34,6 +35,3 @@ class StoreResponse(BaseModel):
     sells_speetto_500: bool = Field(description="스피또500 판매 여부")
     lat: float | None = Field(None, ge=-90, le=90, description="위도 (EPSG:4326)")
     lon: float | None = Field(None, ge=-180, le=180, description="경도 (EPSG:4326)")
-
-
-

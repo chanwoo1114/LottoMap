@@ -1,78 +1,54 @@
 import logging
-import re
 from datetime import datetime
 
 import httpx
-from bs4 import BeautifulSoup
 
 from app.core.database import get_pool
-from app.crawlers.common import BASE_URL, delay, get_client, log_crawl_task
+from app.crawlers.common import (
+    BASE_URL, get_client, log_crawl_start, log_crawl_finish,
+)
 
 logger = logging.getLogger(__name__)
 
-DATE_RE = re.compile(r"(\d{4})[년.\-/\s]+(\d{1,2})[월.\-/\s]+(\d{1,2})")
-GROUP_RE = re.compile(r"([1-5])\s*조")
-SIX_DIGIT_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+_API_URL = f"{BASE_URL}/pt720/selectPstPt720WnList.do"
+_API_HEADERS = {
+    "AJAX": "true",
+    "requestMenuUri": "/pt720/result",
+    "Referer": f"{BASE_URL}/pt720/result",
+}
 
 
-async def crawl_pension_round(
-    round_no: int, client: httpx.AsyncClient | None = None
-) -> dict | None:
+async def fetch_all_pension_results(
+    client: httpx.AsyncClient | None = None
+) -> list[dict]:
+    '''연금복권 720+ 전체 회차를 단일 JSON API 호출로 가져온다'''
     c = client or await get_client()
 
-    try:
-        resp = await c.get(f"{BASE_URL}/gameResult.do", params={
-            "method": "win720",
-            "Round": round_no,
-        })
-        html = resp.text
-    except Exception as e:
-        logger.error(f"[연금] round={round_no} 요청 실패: {e}")
-        return None
+    resp = await c.get(_API_URL, headers=_API_HEADERS)
+    resp.raise_for_status()
+    items = resp.json().get("data", {}).get("result", []) or []
 
-    try:
-        soup = BeautifulSoup(html, "html.parser")
+    results: list[dict] = []
+    for it in items:
+        try:
+            results.append({
+                "round_no": int(it["psltEpsd"]),
+                "draw_date": datetime.strptime(it["psltRflYmd"], "%Y%m%d").date(),
+                "first_prize_group": int(it["wnBndNo"]),
+                "first_prize_number": it["wnRnkVl"],
+                "bonus_number": it["bnsRnkVl"],
+            })
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(
+                f"[PENSION] 파싱 실패 psltEpsd={it.get('psltEpsd')}: {e}"
+            )
 
-        # 당첨 결과 컨테이너: win720 페이지 기준
-        result_box = soup.select_one("div.win720_num") or soup.select_one("div.win_result") or soup
-        text = result_box.get_text(" ", strip=True)
-
-        # 추첨일
-        m = DATE_RE.search(text)
-        if not m:
-            logger.warning(f"[연금] round={round_no} 추첨일 파싱 실패")
-            return None
-        draw_date = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
-
-        # 1등 조 (보통 본문에 '○조' 형태로 표기)
-        group_match = GROUP_RE.search(text)
-        if not group_match:
-            logger.warning(f"[연금] round={round_no} 조 파싱 실패")
-            return None
-        first_prize_group = int(group_match.group(1))
-
-        # 6자리 숫자들: 보통 [1등번호, 보너스번호] 순서
-        six_digits = SIX_DIGIT_RE.findall(text)
-        if len(six_digits) < 2:
-            logger.warning(f"[연금] round={round_no} 6자리 번호 부족: {six_digits}")
-            return None
-
-        first_prize_number = six_digits[0]
-        bonus_number = six_digits[1]
-
-        return {
-            "round_no": round_no,
-            "draw_date": draw_date,
-            "first_prize_group": first_prize_group,
-            "first_prize_number": first_prize_number,
-            "bonus_number": bonus_number,
-        }
-    except Exception as e:
-        logger.error(f"[연금] round={round_no} 파싱 실패: {e}")
-        return None
+    logger.info(f"[PENSION] {len(results)}회차 파싱")
+    return results
 
 
 async def save_pension_results_to_db(results: list[dict]) -> int:
+    '''회차 dict 리스트 저장, 중복은 건너뜀'''
     if not results:
         return 0
 
@@ -81,7 +57,9 @@ async def save_pension_results_to_db(results: list[dict]) -> int:
         INSERT INTO pension_results (
             round_no, draw_date,
             first_prize_group, first_prize_number, bonus_number
-        ) VALUES ($1, $2, $3, $4, $5)
+        ) VALUES (
+            $1, $2, $3, $4, $5
+        )
         ON CONFLICT (round_no) DO NOTHING
     """
     rows = [
@@ -93,83 +71,69 @@ async def save_pension_results_to_db(results: list[dict]) -> int:
     ]
 
     async with pool.acquire() as conn:
-        await conn.executemany(query, rows)
+        async with conn.transaction():
+            await conn.executemany(query, rows)
 
-    logger.info(f"[DB] 연금 {len(rows)}건 저장 시도 (중복 제외)")
+    logger.info(f"[DB] 연금복권 {len(rows)}건 저장 시도 (중복 제외)")
     return len(rows)
 
 
-async def find_missing_pension_rounds(latest_round: int, start_round: int = 1) -> list[int]:
-    pool = await get_pool()
-    rows = await pool.fetch(
-        "SELECT round_no FROM pension_results WHERE round_no BETWEEN $1 AND $2",
-        start_round, latest_round,
-    )
-    existing = {r["round_no"] for r in rows}
-    expected = set(range(start_round, latest_round + 1))
-    return sorted(expected - existing)
-
-
-async def crawl_and_save_all_pension_results(latest_round: int, start_round: int = 1) -> int:
-    """1~latest_round 전체 백필. 회차별 단일 결과라 매 회차 호출."""
-    client = await get_client()
-    total = 0
+async def crawl_and_save_all_pension_results() -> int:
+    '''초기 1회 실행용. 전체 회차를 단일 요청으로 백필'''
+    log_id = await log_crawl_start("crawl_pension_all")
+    logger.info("[START] crawl_pension_all")
 
     try:
-        for n in range(start_round, latest_round + 1):
-            result = await crawl_pension_round(n, client=client)
-            if result:
-                total += await save_pension_results_to_db([result])
-            await delay()
-    finally:
-        await client.aclose()
+        client = await get_client()
+        try:
+            results = await fetch_all_pension_results(client=client)
+        finally:
+            await client.aclose()
 
-    logger.info(f"[연금 크롤링 완료] 시도 건수 {total}")
+        saved = await save_pension_results_to_db(results)
+        msg = f"fetched={len(results)}, saved={saved}"
+        await log_crawl_finish(log_id, "success", msg)
+        logger.info(f"[END] crawl_pension_all: {msg}")
 
-    missing = await find_missing_pension_rounds(latest_round, start_round)
-    if missing:
-        for round_no in missing:
-            await log_crawl_task("crawl_pension_round", "failed", str(round_no))
-        logger.warning(f"[연금] 누락 {len(missing)}건 crawl_logs 기록: {missing}")
-    else:
-        await log_crawl_task(
-            "crawl_pension_all", "success", f"range={start_round}~{latest_round}"
+        return saved
+    except Exception as e:
+        await log_crawl_finish(log_id, "failed", str(e))
+        logger.error(f"[FAIL] crawl_pension_all: {e}")
+        raise
+
+
+async def crawl_latest_pension_round() -> int:
+    '''주간 스케줄용. 전체 응답 중 DB 최신 회차 이후만 저장 (매주 목요일 추첨)'''
+    log_id = await log_crawl_start("crawl_pension_latest")
+
+    try:
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            "SELECT MAX(round_no) AS max_round FROM pension_results"
         )
+        last_round = row["max_round"] or 0
 
-    return total
+        client = await get_client()
+        try:
+            results = await fetch_all_pension_results(client=client)
+        finally:
+            await client.aclose()
 
+        new_results = [r for r in results if r["round_no"] > last_round]
+        if not new_results:
+            msg = f"last={last_round}, 새 회차 없음"
+            await log_crawl_finish(log_id, "partial", msg)
+            logger.info(f"[END] crawl_pension_latest: {msg}")
+            return 0
 
-async def fill_missing_pension_rounds(latest_round: int, start_round: int = 1) -> int:
-    """pension_results에서 누락된 회차만 재크롤링·저장하고 crawl_logs에 기록"""
-    missing = await find_missing_pension_rounds(latest_round, start_round)
-    if not missing:
-        logger.info(f"[연금 보강] 누락 회차 없음 ({start_round}~{latest_round})")
-        return 0
+        saved = await save_pension_results_to_db(new_results)
+        new_rounds = sorted(r["round_no"] for r in new_results)
+        msg = f"last={last_round}, new={new_rounds}, saved={saved}"
+        await log_crawl_finish(log_id, "success", msg)
+        logger.info(f"[END] crawl_pension_latest: {msg}")
 
-    logger.info(f"[연금 보강] 누락 {len(missing)}건: {missing}")
-
-    saved_total = 0
-    client = await get_client()
-    try:
-        for n in missing:
-            result = await crawl_pension_round(n, client=client)
-            if result:
-                saved_total += await save_pension_results_to_db([result])
-            await delay()
-    finally:
-        await client.aclose()
-
-    still_missing = await find_missing_pension_rounds(latest_round, start_round)
-    filled = sorted(set(missing) - set(still_missing))
-
-    for round_no in filled:
-        await log_crawl_task("crawl_pension_round", "success", str(round_no))
-    for round_no in still_missing:
-        await log_crawl_task("crawl_pension_round", "failed", str(round_no))
-
-    if still_missing:
-        logger.warning(f"[연금 보강] 여전히 누락 {len(still_missing)}건: {still_missing}")
-    else:
-        logger.info(f"[연금 보강] 전 회차 완료 ({start_round}~{latest_round})")
-
-    return saved_total
+        return saved
+    except Exception as e:
+        await log_crawl_finish(log_id, "failed", str(e))
+        logger.error(f"[FAIL] crawl_pension_latest: {e}")
+        raise

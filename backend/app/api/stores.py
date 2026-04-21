@@ -58,4 +58,3 @@ async def get_store(
     if not result:
         raise HTTPException(404, "판매점을 찾을 수 없습니다.")
     return result
-
