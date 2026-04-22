@@ -50,3 +50,17 @@ async def log_crawl_finish(log_id: int, status: str, message: str = "") -> None:
         """,
         status, message, log_id,
     )
+
+
+async def log_crawl_failure(
+    log_id: int, task_name: str, sub_key: str, error: str
+) -> None:
+    '''서브 작업 단위 실패를 crawl_failures에 1건 기록'''
+    pool = await get_pool()
+    await pool.execute(
+        """
+        INSERT INTO crawl_failures (log_id, task_name, sub_key, error_msg)
+        VALUES ($1, $2, $3, $4)
+        """,
+        log_id, task_name, sub_key, error[:1000],
+    )

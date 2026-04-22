@@ -5,7 +5,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, log_crawl_start, log_crawl_finish,
+    BASE_URL, delay, get_client, log_crawl_failure, log_crawl_start, log_crawl_finish,
 )
 from app.crawlers.regions import ALL_REGION_PAIRS, CTPV_MAP
 
@@ -164,7 +164,9 @@ async def crawl_all_stores() -> dict:
                 total_upserted += len(stores)
             except Exception as e:
                 failed_regions.append((sido, sigungu))
-                logger.error(f"[FAIL] {sido} {sigungu}: {e}")
+                sub_key = f"{sido}/{sigungu}"
+                await log_crawl_failure(log_id, "crawl_stores", sub_key, str(e))
+                logger.error(f"[FAIL] {sub_key}: {e}")
     finally:
         await client.aclose()
 

@@ -5,7 +5,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, log_crawl_start, log_crawl_finish,
+    BASE_URL, delay, get_client, log_crawl_failure, log_crawl_start, log_crawl_finish,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,9 @@ async def crawl_and_save_all_lotto_results(
                     if results:
                         total += await save_lotto_results_to_db(results)
                 except Exception as e:
-                    logger.error(f"[FAIL] srchLtEpsd={n}: {e}")
+                    sub_key = f"srchLtEpsd={n}"
+                    await log_crawl_failure(log_id, "crawl_lotto_all", sub_key, str(e))
+                    logger.error(f"[FAIL] {sub_key}: {e}")
                 await delay()
         finally:
             await client.aclose()

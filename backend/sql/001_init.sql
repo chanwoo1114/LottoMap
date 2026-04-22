@@ -180,6 +180,35 @@ COMMENT ON COLUMN winning_stores.purchase_method IS '구매 방식 (auto, manual
 COMMENT ON COLUMN winning_stores.created_at IS '데이터 수집 일시';
 
 
+CREATE TABLE ai_predictions (
+    id              SERIAL PRIMARY KEY,
+    target_round    INTEGER NOT NULL,
+    model           VARCHAR(30) NOT NULL,
+    strategy        VARCHAR(30) DEFAULT '',
+    numbers         SMALLINT[] NOT NULL,
+    confidence      SMALLINT DEFAULT 0,
+    hit_count       SMALLINT,
+    matched_bonus   BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    scored_at       TIMESTAMPTZ
+);
+
+CREATE INDEX ix_ai_pred_target ON ai_predictions (target_round);
+CREATE INDEX ix_ai_pred_created ON ai_predictions (created_at DESC);
+
+COMMENT ON TABLE ai_predictions IS '로또 회차별 사전 예측 이력 (AI/Statistical)';
+COMMENT ON COLUMN ai_predictions.id IS 'PK';
+COMMENT ON COLUMN ai_predictions.target_round IS '예측 대상 회차 (추첨 전에 저장됨)';
+COMMENT ON COLUMN ai_predictions.model IS '생성 모델 (ai_ensemble, statistical)';
+COMMENT ON COLUMN ai_predictions.strategy IS 'statistical 전략명 (hot/cold/… ) 또는 빈값';
+COMMENT ON COLUMN ai_predictions.numbers IS '예측 번호 6개';
+COMMENT ON COLUMN ai_predictions.confidence IS '모델 신뢰도 (0~100)';
+COMMENT ON COLUMN ai_predictions.hit_count IS '실제 당첨번호와 일치 개수 (0~6, 미채점 NULL)';
+COMMENT ON COLUMN ai_predictions.matched_bonus IS '보너스 번호 일치 여부';
+COMMENT ON COLUMN ai_predictions.created_at IS '예측 생성 일시';
+COMMENT ON COLUMN ai_predictions.scored_at IS '채점 일시 (추첨 후 업데이트)';
+
+
 CREATE TABLE crawl_logs (
     id          SERIAL PRIMARY KEY,
     task_name   VARCHAR(100) NOT NULL,
@@ -198,3 +227,21 @@ COMMENT ON COLUMN crawl_logs.status IS '실행 상태 (running, success, failed)
 COMMENT ON COLUMN crawl_logs.message IS '결과 메시지 또는 에러 내용';
 COMMENT ON COLUMN crawl_logs.started_at IS '실행 시작 시각';
 COMMENT ON COLUMN crawl_logs.finished_at IS '실행 종료 시각 (실행 중이면 NULL)';
+
+CREATE TABLE crawl_failures (
+    id          SERIAL PRIMARY KEY,
+    log_id      INTEGER NOT NULL REFERENCES crawl_logs(id) ON DELETE CASCADE,
+    task_name   VARCHAR(100) NOT NULL,
+    sub_key     VARCHAR(200) NOT NULL,
+    error_msg   TEXT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX ix_crawl_failures_log ON crawl_failures (log_id);
+CREATE INDEX ix_crawl_failures_task_key ON crawl_failures (task_name, sub_key);
+
+COMMENT ON TABLE crawl_failures IS '크롤링 서브 작업 실패 상세 (재시도/디버깅용)';
+COMMENT ON COLUMN crawl_failures.log_id IS 'crawl_logs FK';
+COMMENT ON COLUMN crawl_failures.task_name IS '상위 태스크명';
+COMMENT ON COLUMN crawl_failures.sub_key IS '실패한 서브 작업 식별자 (예: pt720/1050/2)';
+COMMENT ON COLUMN crawl_failures.error_msg IS '예외 메시지';

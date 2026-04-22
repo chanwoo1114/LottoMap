@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
 
     DHLOTTERY_URL: str = "https://www.dhlottery.co.kr"
+    LOTTO_LATEST: int
 
     @property
     def DATABASE_URL(self) -> str:

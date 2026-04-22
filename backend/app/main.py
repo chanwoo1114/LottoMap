@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    stores, generator,
+    stores, generator, predictions,
 )
 
 logging.basicConfig(
@@ -45,8 +45,4 @@ async def log_requests(request: Request, call_next):
 
 app.include_router(stores.router)
 app.include_router(generator.router)
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+app.include_router(predictions.router)
