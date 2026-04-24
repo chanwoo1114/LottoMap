@@ -209,28 +209,36 @@ COMMENT ON COLUMN ai_predictions.created_at IS '예측 생성 일시';
 COMMENT ON COLUMN ai_predictions.scored_at IS '채점 일시 (추첨 후 업데이트)';
 
 
-CREATE TABLE crawl_logs (
+CREATE TABLE bootstrap_failures (
     id          SERIAL PRIMARY KEY,
     task_name   VARCHAR(100) NOT NULL,
     sub_key     VARCHAR(200) NOT NULL,
-    status      VARCHAR(20) NOT NULL,
-    message     TEXT DEFAULT '',
-    created_at  TIMESTAMPTZ DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    failed_at   TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ,
     UNIQUE (task_name, sub_key)
 );
 
-CREATE INDEX ix_crawl_logs_failed ON crawl_logs (task_name) WHERE status = 'failed';
+CREATE INDEX ix_bootstrap_failures_pending
+    ON bootstrap_failures (task_name)
+    WHERE resolved_at IS NULL;
 
-CREATE TRIGGER trg_crawl_logs_updated_at
-    BEFORE UPDATE ON crawl_logs
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+COMMENT ON TABLE bootstrap_failures IS 'bootstrap 프로세스 전용: 실패 sub_key 재시도 큐';
+COMMENT ON COLUMN bootstrap_failures.id IS 'PK';
+COMMENT ON COLUMN bootstrap_failures.task_name IS '태스크명 (crawl_lotto, crawl_stores, crawl_winning 등)';
+COMMENT ON COLUMN bootstrap_failures.sub_key IS '서브작업 식별자 (예: 1220, 서울/강남구, lt645/1220/1)';
+COMMENT ON COLUMN bootstrap_failures.failed_at IS '최근 실패 시각 (재시도 실패 시 갱신)';
+COMMENT ON COLUMN bootstrap_failures.resolved_at IS '해결된 시각. NULL이면 재시도 대상, NOT NULL이면 완료';
 
-COMMENT ON TABLE crawl_logs IS '크롤링 서브작업 단위 상태 (재시도/모니터링용)';
-COMMENT ON COLUMN crawl_logs.id IS 'PK';
-COMMENT ON COLUMN crawl_logs.task_name IS '태스크명 (crawl_lotto, crawl_stores, crawl_winning 등)';
-COMMENT ON COLUMN crawl_logs.sub_key IS '서브작업 식별자 (예: 1220, 서울/강남구, lt645/1220/1)';
-COMMENT ON COLUMN crawl_logs.status IS '실행 상태 (success | failed)';
-COMMENT ON COLUMN crawl_logs.message IS '결과 메시지 또는 에러 내용';
-COMMENT ON COLUMN crawl_logs.created_at IS '최초 실행 시각';
-COMMENT ON COLUMN crawl_logs.updated_at IS '최근 재시도 시각';
+
+CREATE TABLE worker_status (
+    task_name       VARCHAR(100) PRIMARY KEY,
+    last_run_at     TIMESTAMPTZ,
+    last_success_at TIMESTAMPTZ,
+    last_status     VARCHAR(20)
+);
+
+COMMENT ON TABLE worker_status IS 'worker 프로세스 전용: 정기 크롤 task 단위 운영 상태 (1행/task)';
+COMMENT ON COLUMN worker_status.task_name IS '태스크명 (PK)';
+COMMENT ON COLUMN worker_status.last_run_at IS '가장 최근 실행(성공/실패 무관) 시각';
+COMMENT ON COLUMN worker_status.last_success_at IS '가장 최근 성공 시각 (데이터 신선도 판단용)';
+COMMENT ON COLUMN worker_status.last_status IS '가장 최근 실행 결과 (success | failed)';
