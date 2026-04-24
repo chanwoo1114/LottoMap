@@ -5,7 +5,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, log_crawl_failure, log_crawl_start, log_crawl_finish,
+    BASE_URL, delay, get_client, upsert_crawl_log,
 )
 from app.crawlers.regions import ALL_REGION_PAIRS, CTPV_MAP
 
@@ -90,7 +90,7 @@ async def crawl_store_location_by_region(
                 "sigungu": sigungu,
                 "dong": (item.get("tm3BplcLctnAddr") or "").strip(),
                 "lat": item.get("shpLat"),
-                "lon": item.get("shpLot"),
+                "lng": item.get("shpLot"),
                 "sells_lotto": item.get("l645LtNtslYn") == "Y",
                 "sells_pension": item.get("pt720NtslYn") == "Y",
                 "sells_speetto_2000": item.get("st20LtNtslYn") == "Y",
@@ -118,7 +118,7 @@ async def upsert_stores(stores: list[dict]) -> int:
             s["sido"], s["sigungu"], s["dong"],
             s["sells_lotto"], s["sells_pension"],
             s["sells_speetto_2000"], s["sells_speetto_1000"], s["sells_speetto_500"],
-            s["lat"], s["lon"],
+            s["lat"], s["lng"],
         )
         for s in stores
     ]
@@ -147,7 +147,6 @@ async def mark_closed_stores(seen_store_ids: set[str]) -> int:
 
 async def crawl_all_stores() -> dict:
     '''전체 시군구 순회하며 판매점 정보를 upsert하고 폐점 처리'''
-    log_id = await log_crawl_start("crawl_stores")
     logger.info("[START] crawl_stores")
 
     seen: set[str] = set()
@@ -157,15 +156,18 @@ async def crawl_all_stores() -> dict:
     client = await get_client()
     try:
         for sido, sigungu in ALL_REGION_PAIRS:
+            sub_key = f"{sido}/{sigungu}"
             try:
                 stores = await crawl_store_location_by_region(sido, sigungu, client)
                 await upsert_stores(stores)
                 seen.update(s["store_id"] for s in stores)
                 total_upserted += len(stores)
+                await upsert_crawl_log(
+                    "crawl_stores", sub_key, "success", f"upserted={len(stores)}"
+                )
             except Exception as e:
                 failed_regions.append((sido, sigungu))
-                sub_key = f"{sido}/{sigungu}"
-                await log_crawl_failure(log_id, "crawl_stores", sub_key, str(e))
+                await upsert_crawl_log("crawl_stores", sub_key, "failed", str(e))
                 logger.error(f"[FAIL] {sub_key}: {e}")
     finally:
         await client.aclose()
@@ -174,12 +176,10 @@ async def crawl_all_stores() -> dict:
     if not failed_regions and seen:
         closed_count = await mark_closed_stores(seen)
 
-    status = "success" if not failed_regions else "partial"
     msg = (
         f"upserted={total_upserted}, closed={closed_count}, "
         f"failed_regions={len(failed_regions)}"
     )
-    await log_crawl_finish(log_id, status, msg)
     logger.info(f"[END] crawl_stores: {msg}")
 
     return {

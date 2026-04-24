@@ -42,7 +42,7 @@ async def search_stores(pool: asyncpg.Pool, q: StoreQuery) -> list[dict]:
         SELECT id, store_id, name, address, phone, sido, sigungu, dong,
                sells_lotto, sells_pension,
                sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
-               ST_Y(location) AS lat, ST_X(location) AS lon
+               ST_Y(location) AS lat, ST_X(location) AS lng
         FROM stores
         WHERE {where}
         ORDER BY name
@@ -58,7 +58,7 @@ async def get_store_by_id(pool: asyncpg.Pool, store_id: int) -> dict | None:
         SELECT id, store_id, name, address, phone, sido, sigungu, dong,
                sells_lotto, sells_pension,
                sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
-               ST_Y(location) AS lat, ST_X(location) AS lon
+               ST_Y(location) AS lat, ST_X(location) AS lng
         FROM stores
         WHERE id = $1 AND is_active = TRUE
     """, store_id)
@@ -67,14 +67,14 @@ async def get_store_by_id(pool: asyncpg.Pool, store_id: int) -> dict | None:
 
 
 async def get_nearby_stores(
-    pool: asyncpg.Pool, latitude: float, longitude: float, radius_m: int
+    pool: asyncpg.Pool, lat: float, lng: float, radius_m: int
 ) -> list[dict]:
     """반경 내 판매점 조회 (가까운 순)"""
     rows = await pool.fetch("""
         SELECT id, store_id, name, address, phone,
                sells_lotto, sells_pension,
                sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
-               ST_Y(location) AS lat, ST_X(location) AS lon,
+               ST_Y(location) AS lat, ST_X(location) AS lng,
                ST_DistanceSphere(
                    location,
                    ST_SetSRID(ST_MakePoint($2, $1), 4326)
@@ -87,6 +87,6 @@ async def get_nearby_stores(
               $3
           )
         ORDER BY distance_m ASC
-    """, latitude, longitude, radius_m)
+    """, lat, lng, radius_m)
 
     return [dict(r) for r in rows]

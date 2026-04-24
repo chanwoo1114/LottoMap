@@ -40,7 +40,7 @@ async def nearby_stores(
     return await stores_service.get_nearby_stores(
         pool,
         q.lat,
-        q.lon,
+        q.lng,
         q.radius_m,
     )
 
