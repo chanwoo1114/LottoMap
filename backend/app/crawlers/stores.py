@@ -5,11 +5,13 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, upsert_crawl_log,
+    BASE_URL, delay, get_client, insert_bootstrap_failure,
 )
 from app.crawlers.regions import ALL_REGION_PAIRS, CTPV_MAP
 
 logger = logging.getLogger(__name__)
+
+_TASK_NAME = "crawl_stores"
 
 
 UPSERT_STORE_SQL = """
@@ -52,7 +54,7 @@ async def crawl_store_location_by_region(
     client: httpx.AsyncClient | None = None,
     max_pages: int = 200,
 ) -> list[dict]:
-    '''한 시군구의 모든 판매점을 크롤링해 dict 리스트로 반환'''
+    """한 시군구의 모든 판매점을 크롤링해 dict 리스트로 반환"""
     c = client or await get_client()
     stores: list[dict] = []
     page = 1
@@ -108,7 +110,7 @@ async def crawl_store_location_by_region(
 
 
 async def upsert_stores(stores: list[dict]) -> int:
-    '''판매점 리스트를 stores 테이블에 upsert (시군구 단위 트랜잭션), 처리 건수 반환'''
+    """판매점 리스트를 stores 테이블에 upsert (시군구 단위 트랜잭션), 처리 건수 반환"""
     if not stores:
         return 0
     pool = await get_pool()
@@ -129,7 +131,7 @@ async def upsert_stores(stores: list[dict]) -> int:
 
 
 async def mark_closed_stores(seen_store_ids: set[str]) -> int:
-    '''이번 크롤에서 못 본 active 판매점을 is_active=FALSE 처리, 처리 건수 반환'''
+    """이번 크롤에서 못 본 active 판매점을 is_active=FALSE 처리, 처리 건수 반환"""
     if not seen_store_ids:
         return 0
     pool = await get_pool()
@@ -146,11 +148,12 @@ async def mark_closed_stores(seen_store_ids: set[str]) -> int:
 
 
 async def crawl_all_stores() -> dict:
-    '''전체 시군구 순회하며 판매점 정보를 upsert하고 폐점 처리'''
+    """전체 시군구 순회. {"upserted": N, "closed": N, "failures": [sub_keys]} 반환.
+    실패 sub_key는 'sido/sigungu' 포맷."""
     logger.info("[START] crawl_stores")
 
     seen: set[str] = set()
-    failed_regions: list[tuple[str, str]] = []
+    failures: list[str] = []
     total_upserted = 0
 
     client = await get_client()
@@ -162,28 +165,61 @@ async def crawl_all_stores() -> dict:
                 await upsert_stores(stores)
                 seen.update(s["store_id"] for s in stores)
                 total_upserted += len(stores)
-                await upsert_crawl_log(
-                    "crawl_stores", sub_key, "success", f"upserted={len(stores)}"
-                )
             except Exception as e:
-                failed_regions.append((sido, sigungu))
-                await upsert_crawl_log("crawl_stores", sub_key, "failed", str(e))
+                failures.append(sub_key)
+                try:
+                    await insert_bootstrap_failure(_TASK_NAME, sub_key)
+                except Exception as db_e:
+                    logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
                 logger.error(f"[FAIL] {sub_key}: {e}")
     finally:
         await client.aclose()
 
+    # 실패가 있으면 불완전한 데이터로 판단, mark_closed 건너뜀 (다음 retry 후 수행)
     closed_count = 0
-    if not failed_regions and seen:
+    if not failures and seen:
         closed_count = await mark_closed_stores(seen)
 
-    msg = (
-        f"upserted={total_upserted}, closed={closed_count}, "
-        f"failed_regions={len(failed_regions)}"
+    logger.info(
+        f"[END] crawl_stores: upserted={total_upserted}, closed={closed_count}, "
+        f"failures={len(failures)}"
     )
-    logger.info(f"[END] crawl_stores: {msg}")
-
     return {
         "upserted": total_upserted,
         "closed": closed_count,
-        "failed_regions": failed_regions,
+        "failures": failures,
     }
+
+
+async def retry_stores_sub_keys(sub_keys: list[str]) -> dict:
+    """주어진 'sido/sigungu' 리스트 재시도. {"resolved": [...], "still_failed": [...]} 반환."""
+    if not sub_keys:
+        return {"resolved": [], "still_failed": []}
+
+    logger.info(f"[RETRY] stores {len(sub_keys)}건")
+    resolved: list[str] = []
+    still_failed: list[str] = []
+
+    client = await get_client()
+    try:
+        for sub_key in sub_keys:
+            try:
+                sido, sigungu = sub_key.split("/", 1)
+            except ValueError:
+                logger.warning(f"[RETRY] stores sub_key 파싱 실패: {sub_key}")
+                still_failed.append(sub_key)
+                continue
+            try:
+                stores = await crawl_store_location_by_region(sido, sigungu, client)
+                await upsert_stores(stores)
+                resolved.append(sub_key)
+            except Exception as e:
+                still_failed.append(sub_key)
+                logger.warning(f"[RETRY] stores {sub_key} 여전히 실패: {e}")
+    finally:
+        await client.aclose()
+
+    logger.info(
+        f"[RETRY] stores: resolved={len(resolved)}, still_failed={len(still_failed)}"
+    )
+    return {"resolved": resolved, "still_failed": still_failed}

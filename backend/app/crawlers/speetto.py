@@ -1,10 +1,11 @@
 import logging
 import re
+from datetime import date
 
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import BASE_URL, get_client, log_crawl_finish, log_crawl_start
+from app.crawlers.common import BASE_URL, get_client
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,7 @@ _API_HEADERS = {
     "AJAX": "true",
     "Referer": f"{BASE_URL}/st/pblcnDsctn",
 }
+_IMG_BASE = f"{BASE_URL}/winImages"
 
 TYPE_CD_MAP = {"SP2000": "st2000", "SP1000": "st1000", "SP500": "st500"}
 RT_RE = re.compile(r"(\d[\d,]*)\s*매\s*/\s*(\d[\d,]*)\s*매")
@@ -21,20 +23,22 @@ RT_RE = re.compile(r"(\d[\d,]*)\s*매\s*/\s*(\d[\d,]*)\s*매")
 UPSERT_SPEETTO_SQL = """
 INSERT INTO speetto_games (
     game_id, name, game_type, round_no, price,
-    is_on_sale,
+    sale_end_date, prize_claim_end_date, image_url,
     total_first_prizes, remaining_first_prizes,
     total_second_prizes, remaining_second_prizes,
     intake_rate, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, NOW()
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12, $13, NOW()
 )
 ON CONFLICT (game_id) DO UPDATE SET
     name                    = EXCLUDED.name,
     game_type               = EXCLUDED.game_type,
     round_no                = EXCLUDED.round_no,
     price                   = EXCLUDED.price,
-    is_on_sale              = EXCLUDED.is_on_sale,
+    sale_end_date           = EXCLUDED.sale_end_date,
+    prize_claim_end_date    = EXCLUDED.prize_claim_end_date,
+    image_url               = EXCLUDED.image_url,
     total_first_prizes      = EXCLUDED.total_first_prizes,
     remaining_first_prizes  = EXCLUDED.remaining_first_prizes,
     total_second_prizes     = EXCLUDED.total_second_prizes,
@@ -45,7 +49,7 @@ ON CONFLICT (game_id) DO UPDATE SET
 
 
 def _parse_rt(text: str | None) -> tuple[int, int]:
-    '''"4매/6매" → (remaining=4, total=6). 비정상 값이면 (0, 0)'''
+    """남아있는 매수 구분"""
     if not text:
         return 0, 0
     m = RT_RE.search(text)
@@ -54,6 +58,23 @@ def _parse_rt(text: str | None) -> tuple[int, int]:
     remain = int(m.group(1).replace(",", ""))
     total = int(m.group(2).replace(",", ""))
     return remain, total
+
+
+def _parse_date(text: str | None) -> date | None:
+    """'날짜 데이터 파싱"""
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _build_image_url(path: str | None) -> str | None:
+    """API가 준 상대경로(/img/board/...)를 풀 URL(https://.../winImages/img/...)로 변환"""
+    if not path:
+        return None
+    return f"{_IMG_BASE}{path}"
 
 
 def _parse_item(item: dict) -> dict | None:
@@ -72,7 +93,9 @@ def _parse_item(item: dict) -> dict | None:
         "game_type": game_type,
         "round_no": int(round_no),
         "price": int(item.get("stNtslAmt") or 0),
-        "is_on_sale": item.get("ntslStatus") == "판매중",
+        "sale_end_date": _parse_date(item.get("stNtslEndDt")),
+        "prize_claim_end_date": _parse_date(item.get("stGiveEndDt")),
+        "image_url": _build_image_url(item.get("stMainImgStrgPathNm")),
         "total_first_prizes": total1,
         "remaining_first_prizes": remain1,
         "total_second_prizes": total2,
@@ -85,7 +108,7 @@ async def crawl_speetto_onsale(
     client: httpx.AsyncClient | None = None,
     page_size: int = 100,
 ) -> list[dict]:
-    """판매중인 스피또 회차만 필터링해 반환"""
+    """판매기한이 오늘 이후인 스피또 회차만 반환."""
     c = client or await get_client()
 
     resp = await c.get(
@@ -103,15 +126,21 @@ async def crawl_speetto_onsale(
     data = resp.json().get("data") or {}
     items = data.get("list") or []
 
+    today = date.today()
     rows: list[dict] = []
     for it in items:
-        if it.get("ntslStatus") != "판매중":
-            continue
-        parsed = _parse_item(it)
-        if parsed:
-            rows.append(parsed)
 
-    logger.info(f"[SPEETTO] 판매중 {len(rows)}회차 파싱 (total={data.get('total')})")
+        parsed = _parse_item(it)
+        if not parsed:
+            continue
+        end = parsed["sale_end_date"]
+        if end is None or end < today:
+            continue
+        rows.append(parsed)
+
+    logger.info(
+        f"[SPEETTO] 판매기한 내 {len(rows)}회차 파싱 (total={data.get('total')})"
+    )
     return rows
 
 
@@ -123,7 +152,7 @@ async def save_speetto_to_db(games: list[dict]) -> int:
     rows = [
         (
             g["game_id"], g["name"], g["game_type"], g["round_no"], g["price"],
-            g["is_on_sale"],
+            g["sale_end_date"], g["prize_claim_end_date"], g["image_url"],
             g["total_first_prizes"], g["remaining_first_prizes"],
             g["total_second_prizes"], g["remaining_second_prizes"],
             g["intake_rate"],
@@ -138,25 +167,9 @@ async def save_speetto_to_db(games: list[dict]) -> int:
     return len(rows)
 
 
-async def mark_sold_out_speetto(seen_ids: set[str]) -> int:
-    """이번 크롤에서 안 보인 is_on_sale 회차를 매진 처리"""
-    if not seen_ids:
-        return 0
-    pool = await get_pool()
-    result = await pool.execute(
-        """
-        UPDATE speetto_games
-        SET is_on_sale = FALSE, updated_at = NOW()
-        WHERE is_on_sale = TRUE AND game_id <> ALL($1::varchar[])
-        """,
-        list(seen_ids),
-    )
-    return int(result.split()[-1])
-
-
 async def crawl_and_save_speetto() -> dict:
-    """판매중 스피또 현황을 크롤링·upsert, 매진 회차 처리"""
-    log_id = await log_crawl_start("crawl_speetto")
+    """판매기한 내 스피또 현황 upsert. {"saved": N, "failures": [sub_keys]} 반환.
+    sub_key는 'all' 단일."""
     logger.info("[START] crawl_speetto")
 
     try:
@@ -167,16 +180,35 @@ async def crawl_and_save_speetto() -> dict:
             await client.aclose()
 
         upserted = await save_speetto_to_db(games)
-        seen_ids = {g["game_id"] for g in games}
-        sold_out = await mark_sold_out_speetto(seen_ids)
-
-        msg = f"upserted={upserted}, sold_out={sold_out}"
-        await log_crawl_finish(log_id, "success", msg)
-        logger.info(f"[END] crawl_speetto: {msg}")
-
-        return {"upserted": upserted, "sold_out": sold_out, "games": games}
+        logger.info(f"[END] crawl_speetto: upserted={upserted}")
+        return {"saved": upserted, "failures": []}
     except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
         logger.exception(f"[FAIL] crawl_speetto: {e}")
-        raise
+        return {"saved": 0, "failures": ["all"]}
 
+
+async def retry_speetto_sub_keys(sub_keys: list[str]) -> dict:
+    """speetto는 단일 API라 sub_key='all' 지원."""
+    if not sub_keys:
+        return {"resolved": [], "still_failed": []}
+
+    logger.info(f"[RETRY] speetto {sub_keys}")
+    resolved: list[str] = []
+    still_failed: list[str] = []
+
+    for sub_key in sub_keys:
+        if sub_key != "all":
+            logger.warning(f"[RETRY] speetto 미지원 sub_key: {sub_key}")
+            still_failed.append(sub_key)
+            continue
+        try:
+            result = await crawl_and_save_speetto()
+            if not result["failures"]:
+                resolved.append(sub_key)
+            else:
+                still_failed.append(sub_key)
+        except Exception as e:
+            still_failed.append(sub_key)
+            logger.warning(f"[RETRY] speetto 여전히 실패: {e}")
+
+    return {"resolved": resolved, "still_failed": still_failed}

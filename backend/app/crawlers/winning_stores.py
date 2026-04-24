@@ -4,10 +4,12 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, log_crawl_failure, log_crawl_finish, log_crawl_start,
+    BASE_URL, delay, get_client, insert_bootstrap_failure,
 )
 
 logger = logging.getLogger(__name__)
+
+_TASK_NAME = "crawl_winning"
 
 _LT_URL = f"{BASE_URL}/wnprchsplcsrch/selectLtWnShp.do"
 _PT_URL = f"{BASE_URL}/wnprchsplcsrch/selectPtWnShp.do"
@@ -145,24 +147,91 @@ async def _get_speetto_rounds(client: httpx.AsyncClient) -> dict[str, list[int]]
     return result
 
 
-async def _crawl_game(
-    client: httpx.AsyncClient,
-    game_type: str,
-    rounds: list[int],
-    delay_lo: int,
-    delay_hi: int,
-    log_id: int,
-) -> tuple[int, int]:
-    """단일 게임 타입 전체 회차·등수 크롤링. (saved, failed_calls) 반환"""
-    ranks = _RANK_CONFIG[game_type]
-    saved = 0
-    failed = 0
+async def crawl_all_winning_stores(
+    delay_lo: int = 1, delay_hi: int = 3
+) -> dict:
+    """로또·연금·스피또 전체 회차의 당첨판매점 upsert.
+    {"saved": N, "failures": [sub_keys]} 반환. sub_key는 'game_type/round/rank' 포맷."""
+    logger.info("[START] crawl_winning_stores")
+
+    total_saved = 0
+    failures: list[str] = []
+    lotto_rounds = await _get_rounds_from_db("lotto_results")
+    pension_rounds = await _get_rounds_from_db("pension_results")
+
+    client = await get_client()
+    try:
+        speetto_rounds = await _get_speetto_rounds(client)
+        plan = [
+            ("lt645", lotto_rounds),
+            ("pt720", pension_rounds),
+            ("st2000", speetto_rounds.get("st2000") or []),
+            ("st1000", speetto_rounds.get("st1000") or []),
+            ("st500", speetto_rounds.get("st500") or []),
+        ]
+        for game_type, rounds in plan:
+            if not rounds:
+                logger.warning(f"[WIN] {game_type} 회차 목록 없음, skip")
+                continue
+            ranks = _RANK_CONFIG[game_type]
+            logger.info(
+                f"[WIN] {game_type}: rounds={len(rounds)}, ranks={ranks}"
+            )
+            for rnd in rounds:
+                for rank in ranks:
+                    sub_key = f"{game_type}/{rnd}/{rank}"
+                    try:
+                        items = await _fetch_winning(client, game_type, rnd, rank)
+                        rows = [
+                            r for it in items
+                            if (r := _to_row(game_type, rnd, rank, it)) is not None
+                        ]
+                        if rows:
+                            total_saved += await _save_rows(rows)
+                    except Exception as e:
+                        failures.append(sub_key)
+                        try:
+                            await insert_bootstrap_failure(_TASK_NAME, sub_key)
+                        except Exception as db_e:
+                            logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
+                        logger.warning(f"[WIN] {sub_key} 실패: {e}")
+                    await delay(delay_lo, delay_hi)
+    finally:
+        await client.aclose()
+
     logger.info(
-        f"[WIN] {game_type} 시작: rounds={len(rounds)}, ranks={ranks}, "
-        f"calls={len(rounds) * len(ranks)}"
+        f"[END] crawl_winning_stores: saved={total_saved}, failures={len(failures)}"
     )
-    for rnd in rounds:
-        for rank in ranks:
+    return {"saved": total_saved, "failures": failures}
+
+
+async def retry_winning_sub_keys(
+    sub_keys: list[str], delay_lo: int = 1, delay_hi: int = 3
+) -> dict:
+    """주어진 'game_type/round/rank' 리스트 재시도.
+    {"resolved": [...], "still_failed": [...]} 반환."""
+    if not sub_keys:
+        return {"resolved": [], "still_failed": []}
+
+    logger.info(f"[RETRY] winning {len(sub_keys)}건")
+    resolved: list[str] = []
+    still_failed: list[str] = []
+
+    client = await get_client()
+    try:
+        for sub_key in sub_keys:
+            try:
+                game_type, rnd_s, rank_s = sub_key.split("/")
+                rnd = int(rnd_s)
+                rank = int(rank_s)
+            except ValueError:
+                logger.warning(f"[RETRY] winning sub_key 파싱 실패: {sub_key}")
+                still_failed.append(sub_key)
+                continue
+            if game_type not in _RANK_CONFIG:
+                logger.warning(f"[RETRY] winning 미지원 game_type: {game_type}")
+                still_failed.append(sub_key)
+                continue
             try:
                 items = await _fetch_winning(client, game_type, rnd, rank)
                 rows = [
@@ -170,58 +239,16 @@ async def _crawl_game(
                     if (r := _to_row(game_type, rnd, rank, it)) is not None
                 ]
                 if rows:
-                    saved += await _save_rows(rows)
+                    await _save_rows(rows)
+                resolved.append(sub_key)
             except Exception as e:
-                failed += 1
-                sub_key = f"{game_type}/{rnd}/{rank}"
-                await log_crawl_failure(log_id, "crawl_winning_stores", sub_key, str(e))
-                logger.warning(f"[WIN] {sub_key} 실패: {e}")
+                still_failed.append(sub_key)
+                logger.warning(f"[RETRY] winning {sub_key} 여전히 실패: {e}")
             await delay(delay_lo, delay_hi)
-    logger.info(f"[WIN] {game_type} 종료: saved={saved}, failed={failed}")
-    return saved, failed
+    finally:
+        await client.aclose()
 
-
-async def crawl_all_winning_stores(
-    delay_lo: int = 1, delay_hi: int = 3
-) -> dict:
-    """로또·연금·스피또 전체 회차의 당첨판매점을 winning_stores에 upsert"""
-    log_id = await log_crawl_start("crawl_winning_stores")
-    logger.info("[START] crawl_winning_stores")
-
-    total_saved = 0
-    total_failed = 0
-    try:
-        lotto_rounds = await _get_rounds_from_db("lotto_results")
-        pension_rounds = await _get_rounds_from_db("pension_results")
-
-        client = await get_client()
-        try:
-            speetto_rounds = await _get_speetto_rounds(client)
-            plan = [
-                ("lt645", lotto_rounds),
-                ("pt720", pension_rounds),
-                ("st2000", speetto_rounds.get("st2000") or []),
-                ("st1000", speetto_rounds.get("st1000") or []),
-                ("st500", speetto_rounds.get("st500") or []),
-            ]
-            for game_type, rounds in plan:
-                if not rounds:
-                    logger.warning(f"[WIN] {game_type} 회차 목록 없음, skip")
-                    continue
-                saved, failed = await _crawl_game(
-                    client, game_type, rounds, delay_lo, delay_hi, log_id
-                )
-                total_saved += saved
-                total_failed += failed
-        finally:
-            await client.aclose()
-
-        status = "partial" if total_failed else "success"
-        msg = f"saved={total_saved}, failed={total_failed}"
-        await log_crawl_finish(log_id, status, msg)
-        logger.info(f"[END] crawl_winning_stores: {msg}")
-        return {"saved": total_saved, "failed": total_failed}
-    except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
-        logger.exception(f"[FAIL] crawl_winning_stores: {e}")
-        raise
+    logger.info(
+        f"[RETRY] winning: resolved={len(resolved)}, still_failed={len(still_failed)}"
+    )
+    return {"resolved": resolved, "still_failed": still_failed}

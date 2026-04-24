@@ -1,19 +1,44 @@
+"""초기 데이터 적재 (1회성, CLI로 실행).
 
+흐름:
+  Phase 1 — 모든 step bulk 백필 1회씩 (실패는 bootstrap_failures에 INSERT)
+  Phase 2 — 통합 retry 루프: 모든 task의 잔여를 함께 최대 max_cycles회 재시도
+  Phase 3 — step별 최종 잔여 로깅 후 exit 0
+
+설계 원칙:
+  - max_cycles 한도: 무한 대기 차단, worker 기동 막지 않음
+  - 잔여 있어도 exit 0: worker가 이어받음
+"""
 import argparse
 import asyncio
 import logging
 
 from app.core.config import settings
-from app.core.database import get_pool
-from app.crawlers.lotto import crawl_and_save_all_lotto_results
-from app.crawlers.pension import crawl_and_save_all_pension_results
-from app.crawlers.speetto import crawl_and_save_speetto
-from app.crawlers.stores import crawl_all_stores
-from app.crawlers.winning_stores import crawl_all_winning_stores
+from app.core.database import close_pool, get_pool
+from app.crawlers.common import (
+    delay,
+    get_pending_bootstrap_failures,
+    insert_bootstrap_failure,
+    resolve_bootstrap_failure,
+)
+from app.crawlers.lotto import (
+    crawl_and_save_all_lotto_results, retry_lotto_sub_keys,
+)
+from app.crawlers.pension import (
+    crawl_and_save_all_pension_results, retry_pension_sub_keys,
+)
+from app.crawlers.speetto import (
+    crawl_and_save_speetto, retry_speetto_sub_keys,
+)
+from app.crawlers.stores import (
+    crawl_all_stores, retry_stores_sub_keys,
+)
+from app.crawlers.winning_stores import (
+    crawl_all_winning_stores, retry_winning_sub_keys,
+)
 
 logger = logging.getLogger(__name__)
 
-# step 이름 → 해당 테이블
 STEP_TABLE = {
     "stores":  "stores",
     "lotto":   "lotto_results",
@@ -24,59 +49,148 @@ STEP_TABLE = {
 
 DEFAULT_ORDER = ["speetto", "pension", "lotto", "stores", "winning"]
 
+STEP_TASK = {
+    "speetto": "crawl_speetto",
+    "pension": "crawl_pension",
+    "lotto":   "crawl_lotto",
+    "stores":  "crawl_stores",
+    "winning": "crawl_winning",
+}
+
+STEP_RETRY = {
+    "speetto": retry_speetto_sub_keys,
+    "pension": retry_pension_sub_keys,
+    "lotto":   retry_lotto_sub_keys,
+    "stores":  retry_stores_sub_keys,
+    "winning": retry_winning_sub_keys,
+}
+
 
 async def _has_data(pool, table: str) -> bool:
     row = await pool.fetchrow(f"SELECT EXISTS(SELECT 1 FROM {table})")
     return bool(row[0])
 
 
-async def _run_step(step: str, args: argparse.Namespace) -> None:
+async def _run_bulk_step(step: str, args: argparse.Namespace) -> dict:
+    """step 일괄 백필. 크롤러 리턴 dict ({"failures": [...], ...})"""
     if step == "stores":
-        await crawl_all_stores()
-    elif step == "lotto":
+        return await crawl_all_stores()
+    if step == "lotto":
         latest = args.lotto_latest or settings.LOTTO_LATEST
         if latest is None:
             raise ValueError(
                 "lotto 스텝 실행에는 --lotto-latest 또는 .env의 LOTTO_LATEST 필요"
             )
-        await crawl_and_save_all_lotto_results(latest)
-    elif step == "pension":
-        await crawl_and_save_all_pension_results()
-    elif step == "speetto":
-        await crawl_and_save_speetto()
-    elif step == "winning":
-        await crawl_all_winning_stores()
+        return await crawl_and_save_all_lotto_results(latest)
+    if step == "pension":
+        return await crawl_and_save_all_pension_results()
+    if step == "speetto":
+        return await crawl_and_save_speetto()
+    if step == "winning":
+        breakpoint()
+        return await crawl_all_winning_stores()
+    raise ValueError(f"알 수 없는 step: {step}")
 
 
-async def bootstrap(args: argparse.Namespace) -> dict:
+async def _record_failures(task_name: str, failures: list[str]) -> None:
+    for sub_key in failures:
+        await insert_bootstrap_failure(task_name, sub_key)
+
+
+async def _bulk_phase(args: argparse.Namespace) -> None:
+    """Phase 1: 모든 step bulk 1회씩 실행."""
     pool = await get_pool()
     steps = args.only or DEFAULT_ORDER
     force = set(args.force or [])
 
-    report = {"ran": [], "skipped": [], "failed": []}
+    logger.info("=== Phase 1: 전체 bulk 백필 ===")
+    for i, step in enumerate(steps):
+        if i > 0:
+            logger.info(f"[{step}] step 전환 딜레이")
+            await delay()
 
-    for step in steps:
         table = STEP_TABLE[step]
+        task_name = STEP_TASK[step]
+        print(table, task_name)
         if step not in force and await _has_data(pool, table):
             logger.info(f"[SKIP] {step} ({table} 데이터 존재)")
-            report["skipped"].append(step)
             continue
 
-        logger.info(f"[RUN ] {step}")
+        logger.info(f"[{step}] 백필 시작")
         try:
-            await _run_step(step, args)
-            report["ran"].append(step)
+            result = await _run_bulk_step(step, args)
+            failures = result.get("failures", [])
+            if failures:
+                await _record_failures(task_name, failures)
+            logger.info(f"[{step}] 백필 완료 (실패={len(failures)})")
         except Exception as e:
-            logger.exception(f"[FAIL] {step}: {e}")
-            report["failed"].append(step)
+            logger.exception(f"[{step}] 백필 중 예외: {e}")
             if not args.continue_on_error:
-                break
+                logger.error(
+                    f"[{step}] 치명적 실패, --continue-on-error 없이 중단"
+                )
+                return
 
-    logger.info(
-        f"[BOOTSTRAP] ran={report['ran']}, "
-        f"skipped={report['skipped']}, failed={report['failed']}"
-    )
-    return report
+
+async def _retry_phase(args: argparse.Namespace) -> None:
+    """Phase 2: 모든 task의 bootstrap_failures 잔여를 함께 max_cycles회 재시도."""
+    steps = args.only or DEFAULT_ORDER
+
+    logger.info("=== Phase 2: 통합 retry 루프 ===")
+    for cycle in range(1, args.max_cycles + 1):
+        any_pending = False
+
+        for step in steps:
+            task_name = STEP_TASK[step]
+            pending = await get_pending_bootstrap_failures(task_name)
+            if not pending:
+                continue
+            any_pending = True
+
+            logger.info(
+                f"[{step}] cycle {cycle}/{args.max_cycles}: {len(pending)}건 retry"
+            )
+            try:
+                result = await STEP_RETRY[step](pending)
+            except Exception as e:
+                logger.exception(f"[{step}] retry 중 예외: {e}")
+                result = {"resolved": [], "still_failed": pending}
+
+            for sub_key in result.get("resolved", []):
+                await resolve_bootstrap_failure(task_name, sub_key)
+            for sub_key in result.get("still_failed", []):
+                await insert_bootstrap_failure(task_name, sub_key)
+
+        if not any_pending:
+            logger.info(f"cycle {cycle}: 모든 task 잔여 0 → retry 종료")
+            return
+
+        if cycle >= args.max_cycles:
+            logger.warning(
+                f"max_cycles({args.max_cycles}) 도달, 잔여 있음 → retry 종료"
+            )
+            return
+
+        logger.info(f"{args.retry_interval}초 후 cycle {cycle+1}")
+        await asyncio.sleep(args.retry_interval)
+
+
+async def _final_summary(args: argparse.Namespace) -> None:
+    """Phase 3: step별 최종 잔여 로그."""
+    steps = args.only or DEFAULT_ORDER
+    logger.info("=== Phase 3: 최종 요약 ===")
+    for step in steps:
+        task_name = STEP_TASK[step]
+        remaining = len(await get_pending_bootstrap_failures(task_name))
+        logger.info(f"[{step}] 최종 잔여={remaining}")
+
+
+async def bootstrap_with_retry(args: argparse.Namespace) -> None:
+    """전체 bulk 백필 후 통합 retry 루프. 완료/한도 도달 시 exit 0."""
+    await _bulk_phase(args)
+    breakpoint()
+    await _retry_phase(args)
+    await _final_summary(args)
 
 
 def _parse_steps(value: str) -> list[str]:
@@ -92,7 +206,7 @@ def _parse_steps(value: str) -> list[str]:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="app.jobs.bootstrap",
-        description="초기 데이터 적재. 테이블이 비어있는 스텝만 실행.",
+        description="초기 데이터 적재 (전체 bulk → 통합 retry 루프, 완료 시 exit 0).",
     )
     p.add_argument(
         "--only", type=_parse_steps, default=None,
@@ -107,10 +221,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="로또 최신 회차 (lotto 스텝 실행 시 필수)",
     )
     p.add_argument(
+        "--max-cycles", type=int, default=24,
+        help="retry 사이클 한도 (기본 24 = retry-interval 1시간 × 24 = 24시간)",
+    )
+    p.add_argument(
+        "--retry-interval", type=int, default=3600,
+        help="retry 사이클 간격(초). 기본 3600 = 1시간",
+    )
+    p.add_argument(
         "--continue-on-error", action="store_true",
-        help="중간 스텝 실패해도 다음 스텝 진행",
+        help="bulk 중 예외 발생해도 다음 스텝 진행",
     )
     return p
+
+
+async def _async_main() -> None:
+    args = _build_parser().parse_args()
+    try:
+        await bootstrap_with_retry(args)
+    finally:
+        await close_pool()
 
 
 if __name__ == "__main__":
@@ -118,4 +248,5 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    asyncio.run(bootstrap(_build_parser().parse_args()))
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    asyncio.run(_async_main())

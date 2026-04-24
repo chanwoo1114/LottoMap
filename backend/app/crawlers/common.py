@@ -1,4 +1,4 @@
-"""크롤러 공통 유틸리티 (HTTP 클라이언트, 딜레이, crawl_logs 기록)"""
+"""크롤러 공통 유틸 (HTTP/딜레이) + bootstrap_failures/worker_status 기록 함수."""
 import asyncio
 import logging
 import random
@@ -27,40 +27,70 @@ async def delay(lo: int = 5, hi: int = 11) -> None:
     await asyncio.sleep(random.randint(lo, hi))
 
 
-async def log_crawl_start(task_name: str) -> int:
-    '''크롤 시작 시점에 crawl_logs에 running 상태로 row 생성, id 반환'''
+async def insert_bootstrap_failure(task_name: str, sub_key: str) -> None:
+    """실패 sub_key를 기록. UPSERT이며, 과거 resolved된 행은 resolved_at을 NULL로 되돌림."""
     pool = await get_pool()
-    row = await pool.fetchrow(
-        "INSERT INTO crawl_logs (task_name) VALUES ($1) RETURNING id",
+    await pool.execute(
+        """
+        INSERT INTO bootstrap_failures (task_name, sub_key, failed_at, resolved_at)
+        VALUES ($1, $2, NOW(), NULL)
+        ON CONFLICT (task_name, sub_key) DO UPDATE SET
+            failed_at   = NOW(),
+            resolved_at = NULL
+        """,
+        task_name, sub_key,
+    )
+
+
+async def resolve_bootstrap_failure(task_name: str, sub_key: str) -> None:
+    """실패 해결됨으로 마킹 (soft delete)."""
+    pool = await get_pool()
+    await pool.execute(
+        """
+        UPDATE bootstrap_failures SET resolved_at = NOW()
+        WHERE task_name = $1 AND sub_key = $2 AND resolved_at IS NULL
+        """,
+        task_name, sub_key,
+    )
+
+
+async def get_pending_bootstrap_failures(task_name: str) -> list[str]:
+    """재시도 대상 sub_key 리스트 (resolved_at IS NULL)."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT sub_key FROM bootstrap_failures
+        WHERE task_name = $1 AND resolved_at IS NULL
+        ORDER BY failed_at
+        """,
         task_name,
     )
-    return row["id"]
+    return [r["sub_key"] for r in rows]
 
 
-async def log_crawl_finish(log_id: int, status: str, message: str = "") -> None:
-    '''크롤 종료 시점에 status/message/finished_at 갱신'''
+async def update_worker_status(task_name: str, status: str) -> None:
+    """worker 정기 크롤 상태 갱신. status='success'|'failed'"""
     pool = await get_pool()
-    await pool.execute(
-        """
-        UPDATE crawl_logs
-        SET status      = $1,
-            message     = $2,
-            finished_at = NOW()
-        WHERE id = $3
-        """,
-        status, message, log_id,
-    )
-
-
-async def log_crawl_failure(
-    log_id: int, task_name: str, sub_key: str, error: str
-) -> None:
-    '''서브 작업 단위 실패를 crawl_failures에 1건 기록'''
-    pool = await get_pool()
-    await pool.execute(
-        """
-        INSERT INTO crawl_failures (log_id, task_name, sub_key, error_msg)
-        VALUES ($1, $2, $3, $4)
-        """,
-        log_id, task_name, sub_key, error[:1000],
-    )
+    if status == "success":
+        await pool.execute(
+            """
+            INSERT INTO worker_status (task_name, last_run_at, last_success_at, last_status)
+            VALUES ($1, NOW(), NOW(), 'success')
+            ON CONFLICT (task_name) DO UPDATE SET
+                last_run_at     = NOW(),
+                last_success_at = NOW(),
+                last_status     = 'success'
+            """,
+            task_name,
+        )
+    else:
+        await pool.execute(
+            """
+            INSERT INTO worker_status (task_name, last_run_at, last_status)
+            VALUES ($1, NOW(), 'failed')
+            ON CONFLICT (task_name) DO UPDATE SET
+                last_run_at = NOW(),
+                last_status = 'failed'
+            """,
+            task_name,
+        )

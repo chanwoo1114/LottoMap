@@ -5,10 +5,12 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, log_crawl_failure, log_crawl_start, log_crawl_finish,
+    BASE_URL, delay, get_client, insert_bootstrap_failure,
 )
 
 logger = logging.getLogger(__name__)
+
+_TASK_NAME = "crawl_lotto"
 
 
 async def crawl_lotto_round(
@@ -84,7 +86,7 @@ async def save_lotto_results_to_db(results: list[dict]) -> int:
 
 
 async def find_missing_lotto_rounds(latest_round: int, start_round: int = 1) -> list[int]:
-    '''DB에서 [start_round, latest_round] 범위 중 누락된 회차 조회'''
+    """DB에서 [start_round, latest_round] 범위 중 누락된 회차 조회"""
     pool = await get_pool()
     rows = await pool.fetch(
         "SELECT round_no FROM lotto_results WHERE round_no BETWEEN $1 AND $2",
@@ -97,135 +99,94 @@ async def find_missing_lotto_rounds(latest_round: int, start_round: int = 1) -> 
 
 async def crawl_and_save_all_lotto_results(
     latest_round: int, start_round: int = 1
-) -> int:
-    '''초기 1회 실행용. 1~latest_round 전체 백필, 6회차 간격 호출'''
-    log_id = await log_crawl_start("crawl_lotto_all")
-    logger.info(f"[START] crawl_lotto_all range={start_round}~{latest_round}")
+) -> dict:
+    """초기 1회 백필. {"saved": N, "failures": [sub_keys]} 반환."""
+    logger.info(f"[START] crawl_lotto range={start_round}~{latest_round}")
 
     total = 0
+    failures: list[str] = []
+    client = await get_client()
     try:
-        client = await get_client()
-        try:
-            calls = list(range(start_round + 5, latest_round + 1, 6))
-            if not calls or calls[-1] != latest_round:
-                calls.append(latest_round)
+        calls = list(range(start_round + 5, latest_round + 1, 6))
+        if not calls or calls[-1] != latest_round:
+            calls.append(latest_round)
 
-            for n in calls:
+        for n in calls:
+            sub_key = str(n)
+            try:
+                results = await crawl_lotto_round(n, client=client)
+                if results:
+                    total += await save_lotto_results_to_db(results)
+            except Exception as e:
+                failures.append(sub_key)
                 try:
-                    results = await crawl_lotto_round(n, client=client)
-                    if results:
-                        total += await save_lotto_results_to_db(results)
-                except Exception as e:
-                    sub_key = f"srchLtEpsd={n}"
-                    await log_crawl_failure(log_id, "crawl_lotto_all", sub_key, str(e))
-                    logger.error(f"[FAIL] {sub_key}: {e}")
-                await delay()
-        finally:
-            await client.aclose()
+                    await insert_bootstrap_failure(_TASK_NAME, sub_key)
+                except Exception as db_e:
+                    logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
+                logger.error(f"[FAIL] srchLtEpsd={n}: {e}")
+            await delay()
+    finally:
+        await client.aclose()
 
-        missing = await find_missing_lotto_rounds(latest_round, start_round)
-        status = "partial" if missing else "success"
-        msg = (
-            f"range={start_round}~{latest_round}, saved={total}, "
-            f"missing={len(missing)}"
-            + (f" {missing}" if missing else "")
-        )
-        await log_crawl_finish(log_id, status, msg)
-        logger.info(f"[END] crawl_lotto_all: {msg}")
-
-        return total
-    except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
-        logger.error(f"[FAIL] crawl_lotto_all: {e}")
-        raise
+    missing = await find_missing_lotto_rounds(latest_round, start_round)
+    logger.info(
+        f"[END] crawl_lotto: saved={total}, failures={len(failures)}, "
+        f"missing={len(missing)}"
+    )
+    return {"saved": total, "failures": failures, "missing": missing}
 
 
-async def fill_missing_lotto_rounds(
-    latest_round: int, start_round: int = 1
-) -> int:
-    '''누락된 회차만 재크롤링. 초기 백필 후 로그 보고 재실행할 때 사용'''
-    log_id = await log_crawl_start("crawl_lotto_fill")
+async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
+    """주어진 sub_key들(회차 문자열) 재시도. {"resolved": [...], "still_failed": [...]} 반환."""
+    if not sub_keys:
+        return {"resolved": [], "still_failed": []}
 
+    logger.info(f"[RETRY] lotto {len(sub_keys)}건 재시도")
+    resolved: list[str] = []
+    still_failed: list[str] = []
+
+    client = await get_client()
     try:
-        missing = await find_missing_lotto_rounds(latest_round, start_round)
-        if not missing:
-            msg = f"range={start_round}~{latest_round}, 누락 없음"
-            await log_crawl_finish(log_id, "success", msg)
-            logger.info(f"[END] crawl_lotto_fill: {msg}")
-            return 0
+        for sub_key in sub_keys:
+            try:
+                n = int(sub_key)
+            except ValueError:
+                logger.warning(f"[RETRY] lotto sub_key 파싱 실패: {sub_key}")
+                still_failed.append(sub_key)
+                continue
+            try:
+                results = await crawl_lotto_round(n, client=client)
+                if results:
+                    await save_lotto_results_to_db(results)
+                resolved.append(sub_key)
+            except Exception as e:
+                still_failed.append(sub_key)
+                logger.warning(f"[RETRY] lotto {sub_key} 여전히 실패: {e}")
+            await delay()
+    finally:
+        await client.aclose()
 
-        logger.info(f"[START] crawl_lotto_fill: 누락 {len(missing)}건 {missing}")
-
-        # srchLtEpsd=N이 N-5~N 윈도우를 반환하므로 높은 쪽부터 호출하며 커버 범위 누적
-        targets = sorted(missing, reverse=True)
-        covered: set[int] = set()
-        saved_total = 0
-
-        client = await get_client()
-        try:
-            for n in targets:
-                if n in covered:
-                    continue
-                try:
-                    results = await crawl_lotto_round(n, client=client)
-                    if results:
-                        saved_total += await save_lotto_results_to_db(results)
-                        covered.update(r["round_no"] for r in results)
-                except Exception as e:
-                    logger.error(f"[FAIL] srchLtEpsd={n}: {e}")
-                await delay()
-        finally:
-            await client.aclose()
-
-        still_missing = await find_missing_lotto_rounds(latest_round, start_round)
-        filled = sorted(set(missing) - set(still_missing))
-        status = "partial" if still_missing else "success"
-        msg = (
-            f"filled={len(filled)}, still_missing={len(still_missing)}"
-            + (f" {still_missing}" if still_missing else "")
-        )
-        await log_crawl_finish(log_id, status, msg)
-        logger.info(f"[END] crawl_lotto_fill: {msg}")
-
-        return saved_total
-    except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
-        logger.error(f"[FAIL] crawl_lotto_fill: {e}")
-        raise
+    logger.info(
+        f"[RETRY] lotto: resolved={len(resolved)}, still_failed={len(still_failed)}"
+    )
+    return {"resolved": resolved, "still_failed": still_failed}
 
 
-async def crawl_latest_lotto_round() -> int:
-    '''주간 스케줄용. DB 최신 회차 다음 회차를 시도'''
-    log_id = await log_crawl_start("crawl_lotto_latest")
+async def crawl_latest_lotto_round() -> dict:
+    """주간 스케줄용. 최신 회차 다음 시도. {"saved": N, "target": round_no} 반환.
+    실패 시 예외 raise (호출자가 worker_status 등 처리)."""
+    pool = await get_pool()
+    row = await pool.fetchrow("SELECT MAX(round_no) AS max_round FROM lotto_results")
+    last_round = row["max_round"] or 0
+    target = last_round + 1
+    logger.info(f"[START] crawl_lotto_latest: last={last_round}, target={target}")
 
+    client = await get_client()
     try:
-        pool = await get_pool()
-        row = await pool.fetchrow("SELECT MAX(round_no) AS max_round FROM lotto_results")
-        last_round = row["max_round"] or 0
-        target = last_round + 1
-        logger.info(f"[START] crawl_lotto_latest: last={last_round}, target={target}")
+        results = await crawl_lotto_round(target, client=client)
+    finally:
+        await client.aclose()
 
-        client = await get_client()
-        try:
-            results = await crawl_lotto_round(target, client=client)
-        finally:
-            await client.aclose()
-
-        if not results:
-            msg = f"last={last_round}, target={target}, 새 회차 없음"
-            await log_crawl_finish(log_id, "success", msg)
-            logger.info(f"[END] crawl_lotto_latest: {msg}")
-            return 0
-
-        saved = await save_lotto_results_to_db(results)
-        new_rounds = sorted(r["round_no"] for r in results if r["round_no"] > last_round)
-        status = "success" if target in new_rounds else "partial"
-        msg = f"last={last_round}, target={target}, new={new_rounds}, saved={saved}"
-        await log_crawl_finish(log_id, status, msg)
-        logger.info(f"[END] crawl_lotto_latest: {msg}")
-
-        return saved
-    except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
-        logger.error(f"[FAIL] crawl_lotto_latest: {e}")
-        raise
+    saved = await save_lotto_results_to_db(results) if results else 0
+    logger.info(f"[END] crawl_lotto_latest: saved={saved}")
+    return {"saved": saved, "target": target}

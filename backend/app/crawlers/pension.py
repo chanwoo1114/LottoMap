@@ -4,9 +4,7 @@ from datetime import datetime
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import (
-    BASE_URL, get_client, log_crawl_start, log_crawl_finish,
-)
+from app.crawlers.common import BASE_URL, get_client
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,7 @@ _API_HEADERS = {
 async def fetch_all_pension_results(
     client: httpx.AsyncClient | None = None
 ) -> list[dict]:
-    '''연금복권 720+ 전체 회차를 단일 JSON API 호출로 가져온다'''
+    """연금복권 720+ 전체 회차를 단일 JSON API 호출로 가져온다"""
     c = client or await get_client()
 
     resp = await c.get(_API_URL, headers=_API_HEADERS)
@@ -48,7 +46,7 @@ async def fetch_all_pension_results(
 
 
 async def save_pension_results_to_db(results: list[dict]) -> int:
-    '''회차 dict 리스트 저장, 중복은 건너뜀'''
+    """회차 dict 리스트 저장, 중복은 건너뜀"""
     if not results:
         return 0
 
@@ -78,9 +76,9 @@ async def save_pension_results_to_db(results: list[dict]) -> int:
     return len(rows)
 
 
-async def crawl_and_save_all_pension_results() -> int:
-    '''초기 1회 실행용. 전체 회차를 단일 요청으로 백필'''
-    log_id = await log_crawl_start("crawl_pension_all")
+async def crawl_and_save_all_pension_results() -> dict:
+    """초기 1회 백필. {"saved": N, "failures": [sub_keys]} 반환.
+    단일 API 호출이라 sub_key는 'all' 단일."""
     logger.info("[START] crawl_pension_all")
 
     try:
@@ -91,49 +89,66 @@ async def crawl_and_save_all_pension_results() -> int:
             await client.aclose()
 
         saved = await save_pension_results_to_db(results)
-        msg = f"fetched={len(results)}, saved={saved}"
-        await log_crawl_finish(log_id, "success", msg)
-        logger.info(f"[END] crawl_pension_all: {msg}")
-
-        return saved
+        logger.info(f"[END] crawl_pension_all: fetched={len(results)}, saved={saved}")
+        return {"saved": saved, "failures": []}
     except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
-        logger.error(f"[FAIL] crawl_pension_all: {e}")
-        raise
+        logger.exception(f"[FAIL] crawl_pension_all: {e}")
+        return {"saved": 0, "failures": ["all"]}
 
 
-async def crawl_latest_pension_round() -> int:
-    '''주간 스케줄용. 전체 응답 중 DB 최신 회차 이후만 저장 (매주 목요일 추첨)'''
-    log_id = await log_crawl_start("crawl_pension_latest")
+async def retry_pension_sub_keys(sub_keys: list[str]) -> dict:
+    """pension은 단일 API라 sub_key='all'/'latest' 지원."""
+    if not sub_keys:
+        return {"resolved": [], "still_failed": []}
 
-    try:
-        pool = await get_pool()
-        row = await pool.fetchrow(
-            "SELECT MAX(round_no) AS max_round FROM pension_results"
-        )
-        last_round = row["max_round"] or 0
+    logger.info(f"[RETRY] pension {sub_keys}")
+    resolved: list[str] = []
+    still_failed: list[str] = []
 
-        client = await get_client()
+    for sub_key in sub_keys:
         try:
-            results = await fetch_all_pension_results(client=client)
-        finally:
-            await client.aclose()
+            if sub_key == "all":
+                result = await crawl_and_save_all_pension_results()
+                if not result["failures"]:
+                    resolved.append(sub_key)
+                else:
+                    still_failed.append(sub_key)
+            elif sub_key == "latest":
+                await crawl_latest_pension_round()
+                resolved.append(sub_key)
+            else:
+                logger.warning(f"[RETRY] pension 미지원 sub_key: {sub_key}")
+                still_failed.append(sub_key)
+        except Exception as e:
+            still_failed.append(sub_key)
+            logger.warning(f"[RETRY] pension {sub_key} 여전히 실패: {e}")
 
-        new_results = [r for r in results if r["round_no"] > last_round]
-        if not new_results:
-            msg = f"last={last_round}, 새 회차 없음"
-            await log_crawl_finish(log_id, "partial", msg)
-            logger.info(f"[END] crawl_pension_latest: {msg}")
-            return 0
+    return {"resolved": resolved, "still_failed": still_failed}
 
-        saved = await save_pension_results_to_db(new_results)
-        new_rounds = sorted(r["round_no"] for r in new_results)
-        msg = f"last={last_round}, new={new_rounds}, saved={saved}"
-        await log_crawl_finish(log_id, "success", msg)
-        logger.info(f"[END] crawl_pension_latest: {msg}")
 
-        return saved
-    except Exception as e:
-        await log_crawl_finish(log_id, "failed", str(e))
-        logger.error(f"[FAIL] crawl_pension_latest: {e}")
-        raise
+async def crawl_latest_pension_round() -> dict:
+    """주간 스케줄용. DB 최신 회차 이후만 저장. {"saved": N, "new_rounds": [...]} 반환.
+    실패 시 예외 raise."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT MAX(round_no) AS max_round FROM pension_results"
+    )
+    last_round = row["max_round"] or 0
+
+    client = await get_client()
+    try:
+        results = await fetch_all_pension_results(client=client)
+    finally:
+        await client.aclose()
+
+    new_results = [r for r in results if r["round_no"] > last_round]
+    if not new_results:
+        logger.info(f"[END] crawl_pension_latest: last={last_round}, 새 회차 없음")
+        return {"saved": 0, "new_rounds": []}
+
+    saved = await save_pension_results_to_db(new_results)
+    new_rounds = sorted(r["round_no"] for r in new_results)
+    logger.info(
+        f"[END] crawl_pension_latest: last={last_round}, new={new_rounds}, saved={saved}"
+    )
+    return {"saved": saved, "new_rounds": new_rounds}
