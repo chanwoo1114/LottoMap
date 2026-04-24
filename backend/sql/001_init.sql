@@ -119,7 +119,9 @@ CREATE TABLE speetto_games (
     game_type               VARCHAR(10) NOT NULL,
     round_no                INTEGER NOT NULL,
     price                   INTEGER NOT NULL,
-    is_on_sale              BOOLEAN DEFAULT TRUE,
+    sale_end_date           DATE,
+    prize_claim_end_date    DATE,
+    image_url               TEXT,
     total_first_prizes      INTEGER DEFAULT 0,
     remaining_first_prizes  INTEGER DEFAULT 0,
     total_second_prizes     INTEGER DEFAULT 0,
@@ -129,6 +131,7 @@ CREATE TABLE speetto_games (
 );
 
 CREATE INDEX ix_speetto_type ON speetto_games (game_type);
+CREATE INDEX ix_speetto_sale_end ON speetto_games (sale_end_date);
 
 CREATE TRIGGER trg_speetto_games_updated_at
     BEFORE UPDATE ON speetto_games
@@ -141,7 +144,9 @@ COMMENT ON COLUMN speetto_games.name IS '게임명 (예: 스피또2000 67회)';
 COMMENT ON COLUMN speetto_games.game_type IS '스피또 종류 (st2000, st1000, st500)';
 COMMENT ON COLUMN speetto_games.round_no IS '회차 번호 (종류별 독립 채번)';
 COMMENT ON COLUMN speetto_games.price IS '1장 가격 (원)';
-COMMENT ON COLUMN speetto_games.is_on_sale IS '현재 판매 중 여부 (1등 소진 시 FALSE)';
+COMMENT ON COLUMN speetto_games.sale_end_date IS '판매기한. 오늘 날짜가 이 날짜 이하면 판매 중으로 간주';
+COMMENT ON COLUMN speetto_games.prize_claim_end_date IS '당첨금 지급기한';
+COMMENT ON COLUMN speetto_games.image_url IS '스피또 이미지 전체 URL (https://www.dhlottery.co.kr/winImages + API가 준 경로)';
 COMMENT ON COLUMN speetto_games.total_first_prizes IS '해당 회차 1등 총 발행 매수';
 COMMENT ON COLUMN speetto_games.remaining_first_prizes IS '1등 잔여 매수';
 COMMENT ON COLUMN speetto_games.total_second_prizes IS '2등 총 발행 매수';
