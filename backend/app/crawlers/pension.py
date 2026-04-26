@@ -4,9 +4,14 @@ from datetime import datetime
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import BASE_URL, get_client
+from app.crawlers.common import (
+    BASE_URL, get_client,
+    insert_bootstrap_failure, resolve_bootstrap_failure,
+)
 
 logger = logging.getLogger(__name__)
+
+_TASK_NAME = "crawl_pension"
 
 _API_URL = f"{BASE_URL}/pt720/selectPstPt720WnList.do"
 _API_HEADERS = {
@@ -110,16 +115,21 @@ async def retry_pension_sub_keys(sub_keys: list[str]) -> dict:
             if sub_key == "all":
                 result = await crawl_and_save_all_pension_results()
                 if not result["failures"]:
+                    await resolve_bootstrap_failure(_TASK_NAME, sub_key)
                     resolved.append(sub_key)
                 else:
+                    await insert_bootstrap_failure(_TASK_NAME, sub_key)
                     still_failed.append(sub_key)
             elif sub_key == "latest":
                 await crawl_latest_pension_round()
+                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
                 resolved.append(sub_key)
             else:
                 logger.warning(f"[RETRY] pension 미지원 sub_key: {sub_key}")
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
         except Exception as e:
+            await insert_bootstrap_failure(_TASK_NAME, sub_key)
             still_failed.append(sub_key)
             logger.warning(f"[RETRY] pension {sub_key} 여전히 실패: {e}")
 

@@ -4,7 +4,8 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, insert_bootstrap_failure,
+    BASE_URL, delay, get_client,
+    insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 
 logger = logging.getLogger(__name__)
@@ -226,10 +227,12 @@ async def retry_winning_sub_keys(
                 rank = int(rank_s)
             except ValueError:
                 logger.warning(f"[RETRY] winning sub_key 파싱 실패: {sub_key}")
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
             if game_type not in _RANK_CONFIG:
                 logger.warning(f"[RETRY] winning 미지원 game_type: {game_type}")
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
             try:
@@ -240,8 +243,10 @@ async def retry_winning_sub_keys(
                 ]
                 if rows:
                     await _save_rows(rows)
+                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
                 resolved.append(sub_key)
             except Exception as e:
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 logger.warning(f"[RETRY] winning {sub_key} 여전히 실패: {e}")
             await delay(delay_lo, delay_hi)

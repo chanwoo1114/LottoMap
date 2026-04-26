@@ -5,9 +5,14 @@ from datetime import date
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import BASE_URL, get_client
+from app.crawlers.common import (
+    BASE_URL, get_client,
+    insert_bootstrap_failure, resolve_bootstrap_failure,
+)
 
 logger = logging.getLogger(__name__)
+
+_TASK_NAME = "crawl_speetto"
 
 _API_URL = f"{BASE_URL}/st/selectPblcnDsctn.do"
 _API_HEADERS = {
@@ -199,15 +204,19 @@ async def retry_speetto_sub_keys(sub_keys: list[str]) -> dict:
     for sub_key in sub_keys:
         if sub_key != "all":
             logger.warning(f"[RETRY] speetto 미지원 sub_key: {sub_key}")
+            await insert_bootstrap_failure(_TASK_NAME, sub_key)
             still_failed.append(sub_key)
             continue
         try:
             result = await crawl_and_save_speetto()
             if not result["failures"]:
+                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
                 resolved.append(sub_key)
             else:
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
         except Exception as e:
+            await insert_bootstrap_failure(_TASK_NAME, sub_key)
             still_failed.append(sub_key)
             logger.warning(f"[RETRY] speetto 여전히 실패: {e}")
 

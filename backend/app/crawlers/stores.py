@@ -5,7 +5,8 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, insert_bootstrap_failure,
+    BASE_URL, delay, get_client,
+    insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 from app.crawlers.regions import ALL_REGION_PAIRS, CTPV_MAP
 
@@ -207,13 +208,16 @@ async def retry_stores_sub_keys(sub_keys: list[str]) -> dict:
                 sido, sigungu = sub_key.split("/", 1)
             except ValueError:
                 logger.warning(f"[RETRY] stores sub_key 파싱 실패: {sub_key}")
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
             try:
                 stores = await crawl_store_location_by_region(sido, sigungu, client)
                 await upsert_stores(stores)
+                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
                 resolved.append(sub_key)
             except Exception as e:
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 logger.warning(f"[RETRY] stores {sub_key} 여전히 실패: {e}")
     finally:

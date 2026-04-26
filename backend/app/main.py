@@ -1,14 +1,12 @@
 import logging
 import time
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    stores, generator, predictions,
+    stores, generator, predictions, lotto, pension,
 )
-from app.jobs.scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,20 +15,10 @@ logging.basicConfig(
 logger = logging.getLogger("api")
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    start_scheduler()
-    try:
-        yield
-    finally:
-        shutdown_scheduler()
-
-
 app = FastAPI(
     title="복권지도 API",
     description="동행복권 기반 복권 판매점 지도 서비스",
     version="1.0.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -59,3 +47,5 @@ async def log_requests(request: Request, call_next):
 app.include_router(stores.router)
 app.include_router(generator.router)
 app.include_router(predictions.router)
+app.include_router(lotto.router)
+app.include_router(pension.router)

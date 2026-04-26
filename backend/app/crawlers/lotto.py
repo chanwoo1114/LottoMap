@@ -5,7 +5,8 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client, insert_bootstrap_failure,
+    BASE_URL, delay, get_client,
+    insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,14 +153,17 @@ async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
                 n = int(sub_key)
             except ValueError:
                 logger.warning(f"[RETRY] lotto sub_key 파싱 실패: {sub_key}")
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
             try:
                 results = await crawl_lotto_round(n, client=client)
                 if results:
                     await save_lotto_results_to_db(results)
+                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
                 resolved.append(sub_key)
             except Exception as e:
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 logger.warning(f"[RETRY] lotto {sub_key} 여전히 실패: {e}")
             await delay()

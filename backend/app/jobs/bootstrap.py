@@ -1,14 +1,3 @@
-"""초기 데이터 적재 (1회성, CLI로 실행).
-
-흐름:
-  Phase 1 — 모든 step bulk 백필 1회씩 (실패는 bootstrap_failures에 INSERT)
-  Phase 2 — 통합 retry 루프: 모든 task의 잔여를 함께 최대 max_cycles회 재시도
-  Phase 3 — step별 최종 잔여 로깅 후 exit 0
-
-설계 원칙:
-  - max_cycles 한도: 무한 대기 차단, worker 기동 막지 않음
-  - 잔여 있어도 exit 0: worker가 이어받음
-"""
 import argparse
 import asyncio
 import logging
@@ -19,7 +8,6 @@ from app.crawlers.common import (
     delay,
     get_pending_bootstrap_failures,
     insert_bootstrap_failure,
-    resolve_bootstrap_failure,
 )
 from app.crawlers.lotto import (
     crawl_and_save_all_lotto_results, retry_lotto_sub_keys,
@@ -47,7 +35,13 @@ STEP_TABLE = {
     "winning": "winning_stores",
 }
 
-DEFAULT_ORDER = ["speetto", "pension", "lotto", "stores", "winning"]
+DEFAULT_ORDER = [
+    # "speetto",
+    # "pension",
+    # "lotto",
+    # "stores",
+    "winning",
+]
 
 STEP_TASK = {
     "speetto": "crawl_speetto",
@@ -87,7 +81,6 @@ async def _run_bulk_step(step: str, args: argparse.Namespace) -> dict:
     if step == "speetto":
         return await crawl_and_save_speetto()
     if step == "winning":
-        breakpoint()
         return await crawl_all_winning_stores()
     raise ValueError(f"알 수 없는 step: {step}")
 
@@ -152,14 +145,13 @@ async def _retry_phase(args: argparse.Namespace) -> None:
             )
             try:
                 result = await STEP_RETRY[step](pending)
+                logger.info(
+                    f"[{step}] cycle {cycle}: "
+                    f"resolved={len(result.get('resolved', []))}, "
+                    f"still_failed={len(result.get('still_failed', []))}"
+                )
             except Exception as e:
                 logger.exception(f"[{step}] retry 중 예외: {e}")
-                result = {"resolved": [], "still_failed": pending}
-
-            for sub_key in result.get("resolved", []):
-                await resolve_bootstrap_failure(task_name, sub_key)
-            for sub_key in result.get("still_failed", []):
-                await insert_bootstrap_failure(task_name, sub_key)
 
         if not any_pending:
             logger.info(f"cycle {cycle}: 모든 task 잔여 0 → retry 종료")
@@ -190,6 +182,7 @@ async def bootstrap_with_retry(args: argparse.Namespace) -> None:
     await _bulk_phase(args)
     breakpoint()
     await _retry_phase(args)
+    breakpoint()
     await _final_summary(args)
 
 
