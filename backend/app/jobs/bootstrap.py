@@ -36,10 +36,10 @@ STEP_TABLE = {
 }
 
 DEFAULT_ORDER = [
-    # "speetto",
-    # "pension",
-    # "lotto",
-    # "stores",
+    "speetto",
+    "pension",
+    "lotto",
+    "stores",
     "winning",
 ]
 
@@ -104,10 +104,6 @@ async def _bulk_phase(args: argparse.Namespace) -> None:
 
         table = STEP_TABLE[step]
         task_name = STEP_TASK[step]
-        print(table, task_name)
-        if step not in force and await _has_data(pool, table):
-            logger.info(f"[SKIP] {step} ({table} 데이터 존재)")
-            continue
 
         logger.info(f"[{step}] 백필 시작")
         try:
@@ -180,9 +176,7 @@ async def _final_summary(args: argparse.Namespace) -> None:
 async def bootstrap_with_retry(args: argparse.Namespace) -> None:
     """전체 bulk 백필 후 통합 retry 루프. 완료/한도 도달 시 exit 0."""
     await _bulk_phase(args)
-    breakpoint()
     await _retry_phase(args)
-    breakpoint()
     await _final_summary(args)
 
 

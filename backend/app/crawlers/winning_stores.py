@@ -41,13 +41,31 @@ _LOTTERY_TYPE = {
     "st500": "speetto_500",
 }
 
-# 게임 타입 → 수집할 등수 (API srchWnShpRnk 값, 21=연금 보너스)
-_RANK_CONFIG = {
-    "lt645": [1, 2],
-    "pt720": [1, 2, 21],
-    "st2000": [1, 2],
-    "st1000": [1],
-    "st500": [1],
+# 게임 타입 → 수집할 등수 (API srchWnShpRnk 값)
+# 모두 'all' 한 번 호출 → 응답의 wnShpRnk 로 등수 분리 (_RANK_FILTER 필터)
+_RANK_CONFIG: dict[str, list] = {
+    # "lt645": ["all"],
+    # "pt720": ["all"],
+    "st2000": ["all"],
+    "st1000": ["all"],
+    "st500": ["all"],
+}
+
+# 'all' 응답에서 수집 대상 등수 (game_type 에 등록된 경우만 wnShpRnk 분리)
+# lt645: 1·2등 / pt720: 1·2등 + 21=보너스 / st2000: 1·2등 / st1000·st500: 1등만
+_RANK_FILTER: dict[str, set[int]] = {
+    "lt645": {1, 2},
+    "pt720": {1, 2, 21},
+    "st2000": {1, 2},
+    "st1000": {1},
+    "st500": {1},
+}
+
+# 스피또 종류별 selectStWnShp.do 데이터 시작 회차 (그 이전 회차는 응답이 비어있음)
+_ST_MIN_ROUND: dict[str, int] = {
+    "st2000": 14,
+    "st1000": 16,
+    "st500": 18,
 }
 
 # atmtPsvYn → purchase_method
@@ -55,20 +73,42 @@ _ATMT_MAP = {"M": "manual", "B": "semi_auto", "Q": "auto"}
 
 
 UPSERT_WINNING_SQL = """
+WITH new_store AS (
+    INSERT INTO stores (
+        store_id, name, address, phone,
+        sido, sigungu, dong,
+        location,
+        sells_lotto, sells_pension,
+        sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
+        is_active
+    )
+    VALUES (
+        $4, $5, $6, $7,
+        $8, $9, $10,
+        ST_SetSRID(ST_MakePoint($11, $12), 4326),
+        $13, $14, $15, $16, $17,
+        FALSE
+    )
+    ON CONFLICT (store_id) DO NOTHING
+    RETURNING id
+),
+sid AS (
+    (SELECT id FROM new_store)
+    UNION ALL
+    (SELECT id FROM stores WHERE store_id = $4)
+    LIMIT 1
+)
 INSERT INTO winning_stores (
     lottery_type, round_no, prize_rank,
-    store_id, store_name, store_address, purchase_method
-) VALUES (
-    $1, $2, $3,
-    (SELECT id FROM stores WHERE store_id = $4),
-    $5, $6, $7
+    store_id, purchase_method
 )
-ON CONFLICT (lottery_type, round_no, prize_rank, store_name) DO NOTHING
+SELECT $1, $2, $3, sid.id, $18 FROM sid
+ON CONFLICT (lottery_type, round_no, prize_rank, store_id) DO NOTHING
 """
 
 
 async def _fetch_winning(
-    client: httpx.AsyncClient, game_type: str, round_no: int, rank: int
+    client: httpx.AsyncClient, game_type: str, round_no: int, rank: int | str
 ) -> list[dict]:
     if game_type == "lt645":
         url = _LT_URL
@@ -87,20 +127,66 @@ async def _fetch_winning(
     resp = await client.get(url, params=params, headers=_HEADERS)
     resp.raise_for_status()
     data = resp.json().get("data") or {}
-    return data.get("list") or []
+    items = data.get("list") or []
+    sample = items[0] if items else None
+    logger.info(
+        f"[FETCH] {game_type} round={round_no} rank={rank}: "
+        f"items={len(items)} status={resp.status_code} elapsed={resp.elapsed.total_seconds():.2f}s "
+        f"sample_keys={list(sample.keys()) if sample else None} "
+        f"sample_wnShpRnk={sample.get('wnShpRnk') if sample else None}"
+    )
+    return items
 
 
-def _to_row(game_type: str, round_no: int, rank: int, item: dict) -> tuple | None:
+def _yn(v) -> bool:
+    return v == "Y"
+
+
+def _to_row(game_type: str, round_no: int, rank: int | str, item: dict) -> tuple | None:
+    if rank == "all" and game_type in _RANK_FILTER:
+        try:
+            actual_rank = int(item.get("wnShpRnk") or 0)
+        except (TypeError, ValueError):
+            return None
+        if actual_rank not in _RANK_FILTER[game_type]:
+            return None
+    else:
+        actual_rank = rank
+
     store_name = (item.get("shpNm") or "").strip()
     if not store_name:
         return None
+    raw_id = item.get("ltShpId")
+    lt_shp_id = str(raw_id).strip() if raw_id is not None else ""
+    if not lt_shp_id:
+        return None
+
+    lat_raw = item.get("shpLat")
+    lon_raw = item.get("shpLot")
+    try:
+        lat = float(lat_raw) if lat_raw is not None else None
+        lon = float(lon_raw) if lon_raw is not None else None
+    except (TypeError, ValueError):
+        lat = lon = None
+
     return (
         _LOTTERY_TYPE[game_type],
         round_no,
-        rank,
-        item.get("ltShpId"),
+        actual_rank,
+        lt_shp_id,
         store_name,
         (item.get("shpAddr") or "").strip(),
+        (item.get("shpTelno") or "").strip(),
+        (item.get("tm1ShpLctnAddr") or "").strip(),
+        (item.get("tm2ShpLctnAddr") or "").strip(),
+        (item.get("tm3ShpLctnAddr") or "").strip(),
+        lon,
+        lat,
+        _yn(item.get("l645LtNtslYn")),
+        _yn(item.get("pt720NtslYn")),
+        _yn(item.get("st20LtNtslYn")),
+        _yn(item.get("st10LtNtslYn")),
+        _yn(item.get("st5LtNtslYn")),
         _ATMT_MAP.get(item.get("atmtPsvYn") or "", "unknown"),
     )
 
@@ -115,41 +201,33 @@ async def _save_rows(rows: list[tuple]) -> int:
     return len(rows)
 
 
-async def _get_rounds_from_db(table: str) -> list[int]:
+async def _get_rounds_from_db(table: str, min_round: int = 1) -> list[int]:
     pool = await get_pool()
-    rows = await pool.fetch(f"SELECT round_no FROM {table} ORDER BY round_no")
+    rows = await pool.fetch(
+        f"SELECT round_no FROM {table} WHERE round_no >= $1 ORDER BY round_no",
+        min_round,
+    )
     return [r["round_no"] for r in rows]
 
 
-async def _get_speetto_rounds(client: httpx.AsyncClient) -> dict[str, list[int]]:
-    """selectPblcnDsctn.do 로 전체 스피또 회차 목록(판매중+판매종료)을 종류별로 수집"""
-    resp = await client.get(
-        _SPEETTO_LIST_URL,
-        params={
-            "pageNum": 1,
-            "recordCountPerPage": 500,
-            "gdsType": "",
-            "gdsPrice": "",
-            "gdsStatus": "",
-        },
-        headers=_SPEETTO_HEADERS,
+async def _get_speetto_rounds() -> dict[str, list[int]]:
+    """speetto_games 테이블에서 종류별 max round 만 조회 후
+    _ST_MIN_ROUND ~ max 전 범위 생성."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT game_type, MAX(round_no) AS max_r FROM speetto_games GROUP BY game_type"
     )
-    resp.raise_for_status()
-    items = resp.json().get("data", {}).get("list") or []
+    max_per_type: dict[str, int] = {r["game_type"]: r["max_r"] for r in rows}
 
-    result: dict[str, list[int]] = {"st2000": [], "st1000": [], "st500": []}
-    for it in items:
-        gt = _SP_TYPE_CD.get(it.get("stGmTypeCd"))
-        rnd = it.get("stEpsd")
-        if gt and rnd:
-            result[gt].append(int(rnd))
-    for gt in result:
-        result[gt] = sorted(set(result[gt]))
+    result: dict[str, list[int]] = {}
+    for gt, min_r in _ST_MIN_ROUND.items():
+        max_r = max_per_type.get(gt, 0)
+        result[gt] = list(range(min_r, max_r + 1)) if max_r >= min_r else []
     return result
 
 
 async def crawl_all_winning_stores(
-    delay_lo: int = 1, delay_hi: int = 3
+    delay_lo: int = 5, delay_hi: int = 10
 ) -> dict:
     """로또·연금·스피또 전체 회차의 당첨판매점 upsert.
     {"saved": N, "failures": [sub_keys]} 반환. sub_key는 'game_type/round/rank' 포맷."""
@@ -157,15 +235,30 @@ async def crawl_all_winning_stores(
 
     total_saved = 0
     failures: list[str] = []
-    lotto_rounds = await _get_rounds_from_db("lotto_results")
+    # selectLtWnShp.do 는 1~216 회차 데이터 미제공, 262 부터 안정적
+    lotto_rounds = await _get_rounds_from_db("lotto_results", min_round=262)
     pension_rounds = await _get_rounds_from_db("pension_results")
+    logger.info(
+        f"[PLAN] lotto rounds from DB: {len(lotto_rounds)}건 "
+        f"(범위: {lotto_rounds[0] if lotto_rounds else None}~{lotto_rounds[-1] if lotto_rounds else None})"
+    )
+
+    speetto_rounds = await _get_speetto_rounds()
+    logger.info(
+        f"[PLAN] speetto rounds: "
+        f"st2000={len(speetto_rounds.get('st2000') or [])} "
+        f"(범위: {min(speetto_rounds.get('st2000') or [0])}~{max(speetto_rounds.get('st2000') or [0])}), "
+        f"st1000={len(speetto_rounds.get('st1000') or [])} "
+        f"(범위: {min(speetto_rounds.get('st1000') or [0])}~{max(speetto_rounds.get('st1000') or [0])}), "
+        f"st500={len(speetto_rounds.get('st500') or [])} "
+        f"(범위: {min(speetto_rounds.get('st500') or [0])}~{max(speetto_rounds.get('st500') or [0])})"
+    )
 
     client = await get_client()
     try:
-        speetto_rounds = await _get_speetto_rounds(client)
         plan = [
-            ("lt645", lotto_rounds),
-            ("pt720", pension_rounds),
+            # ("lt645", lotto_rounds),
+            # ("pt720", pension_rounds),
             ("st2000", speetto_rounds.get("st2000") or []),
             ("st1000", speetto_rounds.get("st1000") or []),
             ("st500", speetto_rounds.get("st500") or []),
@@ -207,7 +300,7 @@ async def crawl_all_winning_stores(
 
 
 async def retry_winning_sub_keys(
-    sub_keys: list[str], delay_lo: int = 1, delay_hi: int = 3
+    sub_keys: list[str], delay_lo: int = 5, delay_hi: int = 10
 ) -> dict:
     """주어진 'game_type/round/rank' 리스트 재시도.
     {"resolved": [...], "still_failed": [...]} 반환."""
@@ -221,12 +314,17 @@ async def retry_winning_sub_keys(
     client = await get_client()
     try:
         for sub_key in sub_keys:
-            try:
-                game_type, rnd_s, rank_s = sub_key.split("/")
-                rnd = int(rnd_s)
-                rank = int(rank_s)
-            except ValueError:
+            parts = sub_key.split("/")
+            if len(parts) != 3:
                 logger.warning(f"[RETRY] winning sub_key 파싱 실패: {sub_key}")
+                await insert_bootstrap_failure(_TASK_NAME, sub_key)
+                still_failed.append(sub_key)
+                continue
+            game_type, rnd_s, rank_s = parts
+            try:
+                rnd = int(rnd_s)
+            except ValueError:
+                logger.warning(f"[RETRY] winning round 파싱 실패: {sub_key}")
                 await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
@@ -235,6 +333,17 @@ async def retry_winning_sub_keys(
                 await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
+            rank: int | str
+            if rank_s == "all":
+                rank = "all"
+            else:
+                try:
+                    rank = int(rank_s)
+                except ValueError:
+                    logger.warning(f"[RETRY] winning rank 파싱 실패: {sub_key}")
+                    await insert_bootstrap_failure(_TASK_NAME, sub_key)
+                    still_failed.append(sub_key)
+                    continue
             try:
                 items = await _fetch_winning(client, game_type, rnd, rank)
                 rows = [
