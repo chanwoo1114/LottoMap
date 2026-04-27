@@ -18,8 +18,8 @@ CREATE TABLE stores (
     phone               VARCHAR(20) DEFAULT '',
     location            GEOMETRY(POINT, 4326),
     sido                VARCHAR(20) DEFAULT '',
-    sigungu             VARCHAR(20) DEFAULT '',
-    dong                VARCHAR(20) DEFAULT '',
+    sigungu             VARCHAR(50) DEFAULT '',
+    dong                VARCHAR(100) DEFAULT '',
     sells_lotto         BOOLEAN DEFAULT TRUE,
     sells_pension       BOOLEAN DEFAULT FALSE,
     sells_speetto_2000  BOOLEAN DEFAULT FALSE,
@@ -160,26 +160,22 @@ CREATE TABLE winning_stores (
     lottery_type    VARCHAR(20) NOT NULL,
     round_no        INTEGER NOT NULL,
     prize_rank      SMALLINT NOT NULL,
-    store_id        INTEGER REFERENCES stores(id) ON DELETE SET NULL,
-    store_name      VARCHAR(100) NOT NULL,
-    store_address   VARCHAR(255) NOT NULL,
+    store_id        INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     prize_amount    BIGINT DEFAULT 0,
     purchase_method VARCHAR(20) DEFAULT 'unknown',
     created_at      TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (lottery_type, round_no, prize_rank, store_name)
+    UNIQUE (lottery_type, round_no, prize_rank, store_id)
 );
 
 CREATE INDEX ix_winning_type_round ON winning_stores (lottery_type, round_no);
 CREATE INDEX ix_winning_store ON winning_stores (store_id, lottery_type);
 
-COMMENT ON TABLE winning_stores IS '복권 종류 통합 당첨 판매점 이력';
+COMMENT ON TABLE winning_stores IS '복권 종류 통합 당첨 판매점 이력 (점포명/주소는 stores join)';
 COMMENT ON COLUMN winning_stores.id IS 'PK';
 COMMENT ON COLUMN winning_stores.lottery_type IS '복권 종류 (lotto, pension, speetto)';
 COMMENT ON COLUMN winning_stores.round_no IS '당첨 회차';
 COMMENT ON COLUMN winning_stores.prize_rank IS '당첨 등수 (1, 2, 3)';
-COMMENT ON COLUMN winning_stores.store_id IS '판매점 FK (매칭 실패 시 NULL)';
-COMMENT ON COLUMN winning_stores.store_name IS '크롤링 원본 판매점명';
-COMMENT ON COLUMN winning_stores.store_address IS '크롤링 원본 판매점 주소';
+COMMENT ON COLUMN winning_stores.store_id IS '판매점 FK (stores.id, 매칭 안 되는 점포는 stores 에 is_active=false 로 자동 INSERT)';
 COMMENT ON COLUMN winning_stores.prize_amount IS '당첨금 (원)';
 COMMENT ON COLUMN winning_stores.purchase_method IS '구매 방식 (auto, manual, semi_auto, unknown)';
 COMMENT ON COLUMN winning_stores.created_at IS '데이터 수집 일시';

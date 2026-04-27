@@ -257,8 +257,8 @@ async def crawl_all_winning_stores(
     client = await get_client()
     try:
         plan = [
-            # ("lt645", lotto_rounds),
-            # ("pt720", pension_rounds),
+            ("lt645", lotto_rounds),
+            ("pt720", pension_rounds),
             ("st2000", speetto_rounds.get("st2000") or []),
             ("st1000", speetto_rounds.get("st1000") or []),
             ("st500", speetto_rounds.get("st500") or []),
