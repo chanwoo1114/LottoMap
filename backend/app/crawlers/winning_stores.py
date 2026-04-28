@@ -26,13 +26,10 @@ _SPEETTO_HEADERS = {
     "Referer": f"{BASE_URL}/st/pblcnDsctn",
 }
 
-# 스피또 세부 종류 → API 게임 코드
 _ST_GDS_CODE = {"st2000": "LP35", "st1000": "LP34", "st500": "LP33"}
 
-# selectPblcnDsctn.do 의 stGmTypeCd → 내부 game_type
 _SP_TYPE_CD = {"SP2000": "st2000", "SP1000": "st1000", "SP500": "st500"}
 
-# 내부 game_type → winning_stores.lottery_type
 _LOTTERY_TYPE = {
     "lt645": "lotto",
     "pt720": "pension",
@@ -41,18 +38,6 @@ _LOTTERY_TYPE = {
     "st500": "speetto_500",
 }
 
-# 게임 타입 → 수집할 등수 (API srchWnShpRnk 값)
-# 모두 'all' 한 번 호출 → 응답의 wnShpRnk 로 등수 분리 (_RANK_FILTER 필터)
-_RANK_CONFIG: dict[str, list] = {
-    # "lt645": ["all"],
-    # "pt720": ["all"],
-    "st2000": ["all"],
-    "st1000": ["all"],
-    "st500": ["all"],
-}
-
-# 'all' 응답에서 수집 대상 등수 (game_type 에 등록된 경우만 wnShpRnk 분리)
-# lt645: 1·2등 / pt720: 1·2등 + 21=보너스 / st2000: 1·2등 / st1000·st500: 1등만
 _RANK_FILTER: dict[str, set[int]] = {
     "lt645": {1, 2},
     "pt720": {1, 2, 21},
@@ -61,14 +46,12 @@ _RANK_FILTER: dict[str, set[int]] = {
     "st500": {1},
 }
 
-# 스피또 종류별 selectStWnShp.do 데이터 시작 회차 (그 이전 회차는 응답이 비어있음)
 _ST_MIN_ROUND: dict[str, int] = {
     "st2000": 14,
     "st1000": 16,
     "st500": 18,
 }
 
-# atmtPsvYn → purchase_method
 _ATMT_MAP = {"M": "manual", "B": "semi_auto", "Q": "auto"}
 
 
@@ -108,18 +91,18 @@ ON CONFLICT (lottery_type, round_no, prize_rank, store_id) DO NOTHING
 
 
 async def _fetch_winning(
-    client: httpx.AsyncClient, game_type: str, round_no: int, rank: int | str
+    client: httpx.AsyncClient, game_type: str, round_no: int
 ) -> list[dict]:
     if game_type == "lt645":
         url = _LT_URL
-        params = {"srchWnShpRnk": rank, "srchLtEpsd": round_no, "srchShpLctn": ""}
+        params = {"srchWnShpRnk": "all", "srchLtEpsd": round_no, "srchShpLctn": ""}
     elif game_type == "pt720":
         url = _PT_URL
-        params = {"srchWnShpRnk": rank, "srchLtEpsd": round_no, "srchShpLctn": ""}
+        params = {"srchWnShpRnk": "all", "srchLtEpsd": round_no, "srchShpLctn": ""}
     else:
         url = _ST_URL
         params = {
-            "srchWnShpRnk": rank,
+            "srchWnShpRnk": "all",
             "srchLtEpsd": round_no,
             "srchShpLctn": "",
             "srchLtGdsCd": _ST_GDS_CODE[game_type],
@@ -130,7 +113,7 @@ async def _fetch_winning(
     items = data.get("list") or []
     sample = items[0] if items else None
     logger.info(
-        f"[FETCH] {game_type} round={round_no} rank={rank}: "
+        f"[FETCH] {game_type} round={round_no}: "
         f"items={len(items)} status={resp.status_code} elapsed={resp.elapsed.total_seconds():.2f}s "
         f"sample_keys={list(sample.keys()) if sample else None} "
         f"sample_wnShpRnk={sample.get('wnShpRnk') if sample else None}"
@@ -142,16 +125,13 @@ def _yn(v) -> bool:
     return v == "Y"
 
 
-def _to_row(game_type: str, round_no: int, rank: int | str, item: dict) -> tuple | None:
-    if rank == "all" and game_type in _RANK_FILTER:
-        try:
-            actual_rank = int(item.get("wnShpRnk") or 0)
-        except (TypeError, ValueError):
-            return None
-        if actual_rank not in _RANK_FILTER[game_type]:
-            return None
-    else:
-        actual_rank = rank
+def _to_row(game_type: str, round_no: int, item: dict) -> tuple | None:
+    try:
+        actual_rank = int(item.get("wnShpRnk") or 0)
+    except (TypeError, ValueError):
+        return None
+    if actual_rank not in _RANK_FILTER[game_type]:
+        return None
 
     store_name = (item.get("shpNm") or "").strip()
     if not store_name:
@@ -267,29 +247,25 @@ async def crawl_all_winning_stores(
             if not rounds:
                 logger.warning(f"[WIN] {game_type} 회차 목록 없음, skip")
                 continue
-            ranks = _RANK_CONFIG[game_type]
-            logger.info(
-                f"[WIN] {game_type}: rounds={len(rounds)}, ranks={ranks}"
-            )
+            logger.info(f"[WIN] {game_type}: rounds={len(rounds)}")
             for rnd in rounds:
-                for rank in ranks:
-                    sub_key = f"{game_type}/{rnd}/{rank}"
+                sub_key = f"{game_type}/{rnd}"
+                try:
+                    items = await _fetch_winning(client, game_type, rnd)
+                    rows = [
+                        r for it in items
+                        if (r := _to_row(game_type, rnd, it)) is not None
+                    ]
+                    if rows:
+                        total_saved += await _save_rows(rows)
+                except Exception as e:
+                    failures.append(sub_key)
                     try:
-                        items = await _fetch_winning(client, game_type, rnd, rank)
-                        rows = [
-                            r for it in items
-                            if (r := _to_row(game_type, rnd, rank, it)) is not None
-                        ]
-                        if rows:
-                            total_saved += await _save_rows(rows)
-                    except Exception as e:
-                        failures.append(sub_key)
-                        try:
-                            await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                        except Exception as db_e:
-                            logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
-                        logger.warning(f"[WIN] {sub_key} 실패: {e}")
-                    await delay(delay_lo, delay_hi)
+                        await insert_bootstrap_failure(_TASK_NAME, sub_key)
+                    except Exception as db_e:
+                        logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
+                    logger.warning(f"[WIN] {sub_key} 실패: {e}")
+                await delay(delay_lo, delay_hi)
     finally:
         await client.aclose()
 
@@ -302,7 +278,7 @@ async def crawl_all_winning_stores(
 async def retry_winning_sub_keys(
     sub_keys: list[str], delay_lo: int = 5, delay_hi: int = 10
 ) -> dict:
-    """주어진 'game_type/round/rank' 리스트 재시도.
+    """주어진 'game_type/round' 리스트 재시도.
     {"resolved": [...], "still_failed": [...]} 반환."""
     if not sub_keys:
         return {"resolved": [], "still_failed": []}
@@ -315,12 +291,12 @@ async def retry_winning_sub_keys(
     try:
         for sub_key in sub_keys:
             parts = sub_key.split("/")
-            if len(parts) != 3:
+            if len(parts) != 2:
                 logger.warning(f"[RETRY] winning sub_key 파싱 실패: {sub_key}")
                 await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
-            game_type, rnd_s, rank_s = parts
+            game_type, rnd_s = parts
             try:
                 rnd = int(rnd_s)
             except ValueError:
@@ -328,27 +304,16 @@ async def retry_winning_sub_keys(
                 await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
-            if game_type not in _RANK_CONFIG:
+            if game_type not in _RANK_FILTER:
                 logger.warning(f"[RETRY] winning 미지원 game_type: {game_type}")
                 await insert_bootstrap_failure(_TASK_NAME, sub_key)
                 still_failed.append(sub_key)
                 continue
-            rank: int | str
-            if rank_s == "all":
-                rank = "all"
-            else:
-                try:
-                    rank = int(rank_s)
-                except ValueError:
-                    logger.warning(f"[RETRY] winning rank 파싱 실패: {sub_key}")
-                    await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                    still_failed.append(sub_key)
-                    continue
             try:
-                items = await _fetch_winning(client, game_type, rnd, rank)
+                items = await _fetch_winning(client, game_type, rnd)
                 rows = [
                     r for it in items
-                    if (r := _to_row(game_type, rnd, rank, it)) is not None
+                    if (r := _to_row(game_type, rnd, it)) is not None
                 ]
                 if rows:
                     await _save_rows(rows)

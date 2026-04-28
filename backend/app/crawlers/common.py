@@ -19,7 +19,10 @@ HEADERS = {
 
 async def get_client() -> httpx.AsyncClient:
     client = httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True)
-    await client.get(BASE_URL)
+    try:
+        await client.get(BASE_URL)
+    except httpx.HTTPError as e:
+        logger.warning(f"[get_client] 초기 세션 GET 실패, 무시하고 진행: {e}")
     return client
 
 

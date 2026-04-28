@@ -3,11 +3,10 @@ import asyncio
 import logging
 
 from app.core.config import settings
-from app.core.database import close_pool, get_pool
+from app.core.database import close_pool
 from app.crawlers.common import (
     delay,
     get_pending_bootstrap_failures,
-    insert_bootstrap_failure,
 )
 from app.crawlers.lotto import (
     crawl_and_save_all_lotto_results, retry_lotto_sub_keys,
@@ -26,14 +25,6 @@ from app.crawlers.winning_stores import (
 )
 
 logger = logging.getLogger(__name__)
-
-STEP_TABLE = {
-    "stores":  "stores",
-    "lotto":   "lotto_results",
-    "pension": "pension_results",
-    "speetto": "speetto_games",
-    "winning": "winning_stores",
-}
 
 DEFAULT_ORDER = [
     "speetto",
@@ -60,11 +51,6 @@ STEP_RETRY = {
 }
 
 
-async def _has_data(pool, table: str) -> bool:
-    row = await pool.fetchrow(f"SELECT EXISTS(SELECT 1 FROM {table})")
-    return bool(row[0])
-
-
 async def _run_bulk_step(step: str, args: argparse.Namespace) -> dict:
     """step 일괄 백필. 크롤러 리턴 dict ({"failures": [...], ...})"""
     if step == "stores":
@@ -85,16 +71,9 @@ async def _run_bulk_step(step: str, args: argparse.Namespace) -> dict:
     raise ValueError(f"알 수 없는 step: {step}")
 
 
-async def _record_failures(task_name: str, failures: list[str]) -> None:
-    for sub_key in failures:
-        await insert_bootstrap_failure(task_name, sub_key)
-
-
 async def _bulk_phase(args: argparse.Namespace) -> None:
-    """Phase 1: 모든 step bulk 1회씩 실행."""
-    pool = await get_pool()
+    """Phase 1: 모든 step bulk 1회씩 실행. 한 step이 실패해도 다음 step 계속 진행."""
     steps = args.only or DEFAULT_ORDER
-    force = set(args.force or [])
 
     logger.info("=== Phase 1: 전체 bulk 백필 ===")
     for i, step in enumerate(steps):
@@ -102,23 +81,13 @@ async def _bulk_phase(args: argparse.Namespace) -> None:
             logger.info(f"[{step}] step 전환 딜레이")
             await delay()
 
-        table = STEP_TABLE[step]
-        task_name = STEP_TASK[step]
-
         logger.info(f"[{step}] 백필 시작")
         try:
             result = await _run_bulk_step(step, args)
             failures = result.get("failures", [])
-            if failures:
-                await _record_failures(task_name, failures)
             logger.info(f"[{step}] 백필 완료 (실패={len(failures)})")
         except Exception as e:
-            logger.exception(f"[{step}] 백필 중 예외: {e}")
-            if not args.continue_on_error:
-                logger.error(
-                    f"[{step}] 치명적 실패, --continue-on-error 없이 중단"
-                )
-                return
+            logger.exception(f"[{step}] 백필 중 예외, 다음 step 진행: {e}")
 
 
 async def _retry_phase(args: argparse.Namespace) -> None:
@@ -182,10 +151,10 @@ async def bootstrap_with_retry(args: argparse.Namespace) -> None:
 
 def _parse_steps(value: str) -> list[str]:
     items = [s.strip() for s in (value or "").split(",") if s.strip()]
-    unknown = [s for s in items if s not in STEP_TABLE]
+    unknown = [s for s in items if s not in STEP_TASK]
     if unknown:
         raise argparse.ArgumentTypeError(
-            f"알 수 없는 스텝: {unknown}. 가능한 값: {list(STEP_TABLE)}"
+            f"알 수 없는 스텝: {unknown}. 가능한 값: {list(STEP_TASK)}"
         )
     return items
 
@@ -200,10 +169,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"실행할 스텝만 지정 (콤마 구분). 기본: 전체 {DEFAULT_ORDER}",
     )
     p.add_argument(
-        "--force", type=_parse_steps, default=None,
-        help="데이터 있어도 강제 실행할 스텝 (콤마 구분)",
-    )
-    p.add_argument(
         "--lotto-latest", type=int, default=None,
         help="로또 최신 회차 (lotto 스텝 실행 시 필수)",
     )
@@ -214,10 +179,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--retry-interval", type=int, default=3600,
         help="retry 사이클 간격(초). 기본 3600 = 1시간",
-    )
-    p.add_argument(
-        "--continue-on-error", action="store_true",
-        help="bulk 중 예외 발생해도 다음 스텝 진행",
     )
     return p
 

@@ -189,6 +189,10 @@ async def crawl_and_save_speetto() -> dict:
         return {"saved": upserted, "failures": []}
     except Exception as e:
         logger.exception(f"[FAIL] crawl_speetto: {e}")
+        try:
+            await insert_bootstrap_failure(_TASK_NAME, "all")
+        except Exception as db_e:
+            logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
         return {"saved": 0, "failures": ["all"]}
 
 

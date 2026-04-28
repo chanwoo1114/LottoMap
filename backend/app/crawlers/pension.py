@@ -98,6 +98,10 @@ async def crawl_and_save_all_pension_results() -> dict:
         return {"saved": saved, "failures": []}
     except Exception as e:
         logger.exception(f"[FAIL] crawl_pension_all: {e}")
+        try:
+            await insert_bootstrap_failure(_TASK_NAME, "all")
+        except Exception as db_e:
+            logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
         return {"saved": 0, "failures": ["all"]}
 
 
