@@ -59,6 +59,7 @@ export function MapScreen() {
   }, [location]);
 
 
+
   return (
     <div className="flex h-full flex-col md:flex-row">
       {/* ═══════════════════════ 사이드바 (데스크톱) / 헤더 (모바일) ═══════════════════════ */}
