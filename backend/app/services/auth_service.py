@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -38,6 +39,60 @@ async def signup(pool: asyncpg.Pool, req: SignupRequest) -> TokenResponse:
     )
 
     return await _issue_tokens(pool, user_id)
+
+async def send_email_code(pool: asyncpg.Pool, email: str) -> None:
+    if await pool.fetchval("SELECT 1 FROM users WHERE email = $1", email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 가입된 이메일입니다.",
+        )
+
+    last_sent_at = await pool.fetchval(
+        """SELECT created_at
+           FROM email_verifications
+           WHERE email = $1
+           ORDER BY created_at DESC LIMIT 1""",
+        email,
+    )
+
+    if last_sent_at:
+        elapsed = (datetime.now(timezone.utc) - last_sent_at).total_seconds()
+        if elapsed < settings.EMAIL_CODE_RESEND_COOLDOWN_SECONDS:
+            wait = int(settings.EMAIL_CODE_RESEND_COOLDOWN_SECONDS - elapsed)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"{wait}초 후 다시 요청해주세요.",
+            )
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.EMAIL_CODE_TTL_MINUTES
+    )
+
+    await pool.execute(
+        """INSERT INTO email_verifications (email, code, expires_at)
+           VALUES ($1, $2, $3)""",
+        email, hash_token(code), expires_at,
+    )
+
+
+    await
+
+
+async def verify_email_code(pool: asyncpg.Pool, email: str, code: str) -> None:
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """SELECT id, code, expires_at, attempts, verified_at
+                   FROM email_verifications
+                   WHERE email = $1
+                   ORDER BY created_at DESC LIMIT 1
+                   FOR UPDATE""",
+                email,
+            )
+            print(row)
+
+
 
 async def login(pool: asyncpg.Pool, req: LoginRequest) -> TokenResponse:
     user = await pool.fetchrow(

@@ -56,7 +56,7 @@ COMMENT ON COLUMN refresh_tokens.revoked_at IS '무효화 시각';
 CREATE TABLE email_verifications (
   id          SERIAL PRIMARY KEY,
   email       VARCHAR(255) NOT NULL,
-  code_hash   VARCHAR(64)  NOT NULL,
+  code   VARCHAR(64)  NOT NULL,
   expires_at  TIMESTAMPTZ  NOT NULL,
   verified_at TIMESTAMPTZ,
   attempts    SMALLINT     DEFAULT 0,

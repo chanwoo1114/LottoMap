@@ -11,14 +11,22 @@ class LoginRequest(BaseModel):
 
 
 class KakaoLoginRequest(BaseModel):
-  access_token: str = Field(description="카카오 JS SDK로 발급받은 access token")
+    access_token: str = Field(description="카카오 JS SDK로 발급받은 access token")
 
 
 class RefreshRequest(BaseModel):
-  refresh_token: str = Field(description="리프레시 토큰")
+    refresh_token: str = Field(description="리프레시 토큰")
 
 
 class TokenResponse(BaseModel):
-  access_token: str
-  refresh_token: str
-  token_type: str = "bearer"
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class EmailSendRequest(BaseModel):
+    email: EmailStr = Field(description="인증 코드 받을 이메일")
+
+class EmailVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_lenth=6, max_lenth=6,  pattern=r"^\d{6}$", description="6자리 숫자 코드")
