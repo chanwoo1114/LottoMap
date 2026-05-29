@@ -67,26 +67,21 @@ async def get_store_by_id(pool: asyncpg.Pool, store_id: int) -> dict | None:
 
 
 async def get_nearby_stores(
-    pool: asyncpg.Pool, lat: float, lng: float, radius_m: int
+    pool: asyncpg.Pool,
+    min_lat: float, min_lng: float,
+    max_lat: float, max_lng: float,
+    limit: int
 ) -> list[dict]:
-    """반경 내 판매점 조회 (가까운 순)"""
+    """화면 영역(bbox) 내 판매점 조회"""
     rows = await pool.fetch("""
-        SELECT id, store_id, name, address, phone,
-               sells_lotto, sells_pension,
+        SELECT id, store_id, name, address, phone, sido, sigungu, dong,
+               sells_lotto, sells_pension, 
                sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
-               ST_Y(location) AS lat, ST_X(location) AS lng,
-               ST_DistanceSphere(
-                   location,
-                   ST_SetSRID(ST_MakePoint($2, $1), 4326)
-               )::int AS distance_m
+               ST_Y(location) AS lat, ST_X(location) AS lng
         FROM stores
         WHERE is_active = TRUE
-          AND ST_DWithin(
-              location::geography,
-              ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-              $3
-          )
-        ORDER BY distance_m ASC
-    """, lat, lng, radius_m)
+            AND location && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+        LIMIT $5
+    """, min_lng, min_lat, max_lng, max_lat, limit)
 
     return [dict(r) for r in rows]

@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 
 import httpx
@@ -12,6 +13,24 @@ from app.crawlers.common import (
 logger = logging.getLogger(__name__)
 
 _TASK_NAME = "crawl_lotto"
+
+_OPT_VAL_RE = re.compile(r'id="opt_val"[^>]*value="(\d+)"')
+
+
+async def fetch_latest_lotto_round() -> int:
+    """동행복권 결과 페이지에서 최신 회차 번호 파싱"""
+    client = await get_client()
+    try:
+        resp = await client.get(f"{BASE_URL}/lt645/result")
+        resp.raise_for_status()
+        m = _OPT_VAL_RE.search(resp.text)
+        if not m:
+            raise RuntimeError("[LOTTO] 최신 회차 파싱 실패: opt_val 못 찾음")
+        latest = int(m.group(1))
+        logger.info(f"[LOTTO] 최신 회차 감지: {latest}")
+        return latest
+    finally:
+        await client.aclose()
 
 
 async def crawl_lotto_round(
@@ -87,7 +106,7 @@ async def save_lotto_results_to_db(results: list[dict]) -> int:
 
 
 async def find_missing_lotto_rounds(latest_round: int, start_round: int = 1) -> list[int]:
-    """DB에서 [start_round, latest_round] 범위 중 누락된 회차 조회"""
+    """누락 회차 조회"""
     pool = await get_pool()
     rows = await pool.fetch(
         "SELECT round_no FROM lotto_results WHERE round_no BETWEEN $1 AND $2",
@@ -101,16 +120,15 @@ async def find_missing_lotto_rounds(latest_round: int, start_round: int = 1) -> 
 async def crawl_and_save_all_lotto_results(
     latest_round: int, start_round: int = 1
 ) -> dict:
-    """초기 1회 백필. {"saved": N, "failures": [sub_keys]} 반환."""
+    """초기 1회 전체 회차 적재"""
     logger.info(f"[START] crawl_lotto range={start_round}~{latest_round}")
 
     total = 0
     failures: list[str] = []
     client = await get_client()
     try:
-        calls = list(range(start_round + 5, latest_round + 1, 6))
-        if not calls or calls[-1] != latest_round:
-            calls.append(latest_round)
+        calls = list(range(start_round + 9, latest_round, 10))
+        calls.append(latest_round)
 
         for n in calls:
             sub_key = str(n)
@@ -138,7 +156,7 @@ async def crawl_and_save_all_lotto_results(
 
 
 async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
-    """주어진 sub_key들(회차 문자열) 재시도. {"resolved": [...], "still_failed": [...]} 반환."""
+    """실패 회차 재시도"""
     if not sub_keys:
         return {"resolved": [], "still_failed": []}
 
@@ -177,8 +195,7 @@ async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
 
 
 async def crawl_latest_lotto_round() -> dict:
-    """주간 스케줄용. 최신 회차 다음 시도. {"saved": N, "target": round_no} 반환.
-    실패 시 예외 raise (호출자가 worker_status 등 처리)."""
+    """주간 스케줄 — 신규 회차만 저장"""
     pool = await get_pool()
     row = await pool.fetchrow("SELECT MAX(round_no) AS max_round FROM lotto_results")
     last_round = row["max_round"] or 0

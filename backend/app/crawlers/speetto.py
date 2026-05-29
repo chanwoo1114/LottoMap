@@ -5,14 +5,9 @@ from datetime import date
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import (
-    BASE_URL, get_client,
-    insert_bootstrap_failure, resolve_bootstrap_failure,
-)
+from app.crawlers.common import BASE_URL, get_client
 
 logger = logging.getLogger(__name__)
-
-_TASK_NAME = "crawl_speetto"
 
 _API_URL = f"{BASE_URL}/st/selectPblcnDsctn.do"
 _API_HEADERS = {
@@ -76,7 +71,7 @@ def _parse_date(text: str | None) -> date | None:
 
 
 def _build_image_url(path: str | None) -> str | None:
-    """API가 준 상대경로(/img/board/...)를 풀 URL(https://.../winImages/img/...)로 변환"""
+    """API가 준 상대경로를 풀 URL로 변환"""
     if not path:
         return None
     return f"{_IMG_BASE}{path}"
@@ -173,8 +168,7 @@ async def save_speetto_to_db(games: list[dict]) -> int:
 
 
 async def crawl_and_save_speetto() -> dict:
-    """판매기한 내 스피또 현황 upsert. {"saved": N, "failures": [sub_keys]} 반환.
-    sub_key는 'all' 단일."""
+    """판매기한 내 스피또 현황 upsert. 실패 시 다음 정규 스케줄에서 자연 재시도."""
     logger.info("[START] crawl_speetto")
 
     try:
@@ -189,39 +183,4 @@ async def crawl_and_save_speetto() -> dict:
         return {"saved": upserted, "failures": []}
     except Exception as e:
         logger.exception(f"[FAIL] crawl_speetto: {e}")
-        try:
-            await insert_bootstrap_failure(_TASK_NAME, "all")
-        except Exception as db_e:
-            logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
         return {"saved": 0, "failures": ["all"]}
-
-
-async def retry_speetto_sub_keys(sub_keys: list[str]) -> dict:
-    """speetto는 단일 API라 sub_key='all' 지원."""
-    if not sub_keys:
-        return {"resolved": [], "still_failed": []}
-
-    logger.info(f"[RETRY] speetto {sub_keys}")
-    resolved: list[str] = []
-    still_failed: list[str] = []
-
-    for sub_key in sub_keys:
-        if sub_key != "all":
-            logger.warning(f"[RETRY] speetto 미지원 sub_key: {sub_key}")
-            await insert_bootstrap_failure(_TASK_NAME, sub_key)
-            still_failed.append(sub_key)
-            continue
-        try:
-            result = await crawl_and_save_speetto()
-            if not result["failures"]:
-                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
-                resolved.append(sub_key)
-            else:
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-        except Exception as e:
-            await insert_bootstrap_failure(_TASK_NAME, sub_key)
-            still_failed.append(sub_key)
-            logger.warning(f"[RETRY] speetto 여전히 실패: {e}")
-
-    return {"resolved": resolved, "still_failed": still_failed}

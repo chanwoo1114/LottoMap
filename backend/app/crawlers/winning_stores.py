@@ -191,8 +191,7 @@ async def _get_rounds_from_db(table: str, min_round: int = 1) -> list[int]:
 
 
 async def _get_speetto_rounds() -> dict[str, list[int]]:
-    """speetto_games 테이블에서 종류별 max round 만 조회 후
-    _ST_MIN_ROUND ~ max 전 범위 생성."""
+    """스피또 종류별 회차 범위 생성"""
     pool = await get_pool()
     rows = await pool.fetch(
         "SELECT game_type, MAX(round_no) AS max_r FROM speetto_games GROUP BY game_type"

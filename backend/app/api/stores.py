@@ -30,18 +30,20 @@ async def list_stores(
 @router.get(
     "/nearby",
     response_model=list[StoreResponse],
-    summary="반경 내 판매점 조회",
+    summary="화면 영역(bbox) 내 판매점 조회",
 )
 async def nearby_stores(
     q: Annotated[NearbyStoreQuery, Query()],
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    """위도·경도 기준 반경(m, 최대 5km) 내 판매점을 가까운 순으로 반환"""
+    """남서·북동 좌표로 정의된 사각형 영역 내 판매점 반환"""
     return await stores_service.get_nearby_stores(
         pool,
-        q.lat,
-        q.lng,
-        q.radius_m,
+        q.min_lat,
+        q.min_lng,
+        q.max_lat,
+        q.max_lng,
+        q.limit,
     )
 
 @router.get(

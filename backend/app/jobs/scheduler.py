@@ -1,59 +1,75 @@
-"""APScheduler 기반 크롤러 스케쥴 + 실패 sweeper.
-
-- 추첨 스케줄: 로또(토 20:35), 연금복권(목 20:00)
-- 모든 cron은 KST 기준
-- 실패 작업은 별도 sweeper가 1시간 간격으로 재시도
-"""
 import logging
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app.crawlers.lotto import crawl_latest_lotto_round, retry_failed_lotto
-from app.crawlers.pension import crawl_latest_pension_round, retry_failed_pension
-from app.crawlers.speetto import crawl_and_save_speetto, retry_failed_speetto
-from app.crawlers.stores import crawl_all_stores, retry_failed_stores
+from app.crawlers.lotto import crawl_latest_lotto_round, retry_lotto_sub_keys
+from app.crawlers.pension import crawl_latest_pension_round, retry_pension_sub_keys
+from app.crawlers.speetto import crawl_and_save_speetto
+from app.crawlers.stores import crawl_all_stores, retry_stores_sub_keys
 from app.crawlers.winning_stores import (
-    crawl_all_winning_stores, retry_failed_winning_stores,
+    crawl_all_winning_stores, retry_winning_sub_keys,
 )
+from app.crawlers.common import get_pending_bootstrap_failures
 from app.jobs.predictions_job import generate_for_next_round, score_latest_round
 
 logger = logging.getLogger(__name__)
 
 KST = "Asia/Seoul"
 
+SWEEP_JOB_ID = "sweep_failed"
+SWEEP_INTERVAL = timedelta(minutes=5)
+
 _scheduler: AsyncIOScheduler | None = None
 
 
 async def sweep_failed() -> None:
-    """모든 크롤러의 failed 작업을 한 번씩 재시도"""
+    """모든 크롤러의 bootstrap_failures 잔여를 한 번씩 재시도.
+    끝나면 SWEEP_INTERVAL 뒤로 self-reschedule."""
     logger.info("[SWEEP] 실패 작업 재시도 시작")
-    for name, fn in (
-        ("lotto", retry_failed_lotto),
-        ("pension", retry_failed_pension),
-        ("speetto", retry_failed_speetto),
-        ("stores", retry_failed_stores),
-        ("winning", retry_failed_winning_stores),
-    ):
-        try:
-            await fn()
-        except Exception as e:
-            logger.exception(f"[SWEEP] {name} 재시도 중 예외: {e}")
+    try:
+        for name, task_name, fn in (
+            ("lotto",   "crawl_lotto",   retry_lotto_sub_keys),
+            ("pension", "crawl_pension", retry_pension_sub_keys),
+            ("stores",  "crawl_stores",  retry_stores_sub_keys),
+            ("winning", "crawl_winning", retry_winning_sub_keys),
+        ):
+            try:
+                pending = await get_pending_bootstrap_failures(task_name)
+                if not pending:
+                    continue
+                logger.info(f"[SWEEP] {name}: {len(pending)}건 retry")
+                await fn(pending)
+            except Exception as e:
+                logger.exception(f"[SWEEP] {name} 재시도 중 예외: {e}")
+    finally:
+        if _scheduler is not None:
+            next_at = datetime.now() + SWEEP_INTERVAL
+            try:
+                _scheduler.reschedule_job(
+                    SWEEP_JOB_ID,
+                    trigger=DateTrigger(run_date=next_at, timezone=KST),
+                )
+                logger.info(f"[SWEEP] 다음 실행: {next_at.isoformat()}")
+            except Exception as e:
+                logger.exception(f"[SWEEP] reschedule 실패: {e}")
 
 
 def _build_scheduler() -> AsyncIOScheduler:
     sched = AsyncIOScheduler(timezone=KST)
 
-    # 로또 — 토요일 20:35 추첨, 22:00 KST에 수집
+    # 로또 — 토요일 21시에 수집
     sched.add_job(
         crawl_latest_lotto_round,
-        CronTrigger(day_of_week="sat", hour=22, minute=0, timezone=KST),
+        CronTrigger(day_of_week="sat", hour=21, minute=0, timezone=KST),
         id="crawl_lotto_latest",
         replace_existing=True,
     )
 
-    # 연금복권 — 목요일 20:00 추첨, 21:00 KST에 수집
+    # 연금복권 — 목요일 21시에 수집
     sched.add_job(
         crawl_latest_pension_round,
         CronTrigger(day_of_week="thu", hour=21, minute=0, timezone=KST),
@@ -61,26 +77,26 @@ def _build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 스피또 — 판매현황은 매일 갱신 필요, 새벽 04:00 KST
+    # 스피또 — 판매현황 1시간 간격
     sched.add_job(
         crawl_and_save_speetto,
-        CronTrigger(hour=4, minute=0, timezone=KST),
+        IntervalTrigger(hours=1),
         id="crawl_speetto",
         replace_existing=True,
     )
 
-    # 판매점 — 변경 빈도 낮음. 일요일 03:00 KST
+    # 판매점 — 매일 03:00
     sched.add_job(
         crawl_all_stores,
-        CronTrigger(day_of_week="sun", hour=3, minute=0, timezone=KST),
+        CronTrigger(hour=3, minute=0, timezone=KST),
         id="crawl_stores",
         replace_existing=True,
     )
 
-    # 당첨판매점 — 일요일 04:00 KST (stores 이후)
+    # 당첨판매점 — 1시간 간격
     sched.add_job(
         crawl_all_winning_stores,
-        CronTrigger(day_of_week="sun", hour=4, minute=0, timezone=KST),
+        IntervalTrigger(hours=1),
         id="crawl_winning_stores",
         replace_existing=True,
     )
@@ -101,11 +117,11 @@ def _build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # 실패 sweeper — 1시간 간격
+    # 실패 sweeper — 첫 실행만 등록, 이후엔 job 내부에서 self-reschedule
     sched.add_job(
         sweep_failed,
-        IntervalTrigger(hours=1),
-        id="sweep_failed",
+        DateTrigger(run_date=datetime.now() + SWEEP_INTERVAL, timezone=KST),
+        id=SWEEP_JOB_ID,
         replace_existing=True,
     )
 
@@ -130,3 +146,36 @@ def shutdown_scheduler() -> None:
     _scheduler.shutdown(wait=False)
     _scheduler = None
     logger.info("[SCHED] 종료")
+
+
+async def _run_forever() -> None:
+    import asyncio
+    import signal
+
+    from app.core.database import close_pool
+
+    start_scheduler()
+
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop_event.set)
+
+    try:
+        await stop_event.wait()
+    finally:
+        shutdown_scheduler()
+        await close_pool()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.INFO)
+
+    asyncio.run(_run_forever())

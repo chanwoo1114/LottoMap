@@ -24,7 +24,7 @@ _API_HEADERS = {
 async def fetch_all_pension_results(
     client: httpx.AsyncClient | None = None
 ) -> list[dict]:
-    """연금복권 720+ 전체 회차를 단일 JSON API 호출로 가져온다"""
+    """연금복권 720+ 전체 회차 API 호출"""
     c = client or await get_client()
 
     resp = await c.get(_API_URL, headers=_API_HEADERS)
@@ -82,8 +82,7 @@ async def save_pension_results_to_db(results: list[dict]) -> int:
 
 
 async def crawl_and_save_all_pension_results() -> dict:
-    """초기 1회 백필. {"saved": N, "failures": [sub_keys]} 반환.
-    단일 API 호출이라 sub_key는 'all' 단일."""
+    """초기 1회 전체 회차 적재"""
     logger.info("[START] crawl_pension_all")
 
     try:
@@ -106,7 +105,7 @@ async def crawl_and_save_all_pension_results() -> dict:
 
 
 async def retry_pension_sub_keys(sub_keys: list[str]) -> dict:
-    """pension은 단일 API라 sub_key='all'/'latest' 지원."""
+    """실패 sub_key 재시도 ('all'/'latest')"""
     if not sub_keys:
         return {"resolved": [], "still_failed": []}
 
@@ -141,8 +140,7 @@ async def retry_pension_sub_keys(sub_keys: list[str]) -> dict:
 
 
 async def crawl_latest_pension_round() -> dict:
-    """주간 스케줄용. DB 최신 회차 이후만 저장. {"saved": N, "new_rounds": [...]} 반환.
-    실패 시 예외 raise."""
+    """주간 스케줄 — 신규 회차만 저장"""
     pool = await get_pool()
     row = await pool.fetchrow(
         "SELECT MAX(round_no) AS max_round FROM pension_results"
@@ -163,6 +161,6 @@ async def crawl_latest_pension_round() -> dict:
     saved = await save_pension_results_to_db(new_results)
     new_rounds = sorted(r["round_no"] for r in new_results)
     logger.info(
-        f"[END] crawl_pension_latest: last={last_round}, new={new_rounds}, saved={saved}"
+        f"[END] crawl_pension_latest: last={last_round}, saved={saved}"
     )
     return {"saved": saved, "new_rounds": new_rounds}

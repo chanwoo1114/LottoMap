@@ -46,3 +46,6 @@ uvicorn==0.44.0
 uvloop==0.22.1
 watchfiles==1.1.1
 websockets==16.0
+PyJWT==2.10.1
+bcrypt==4.2.1
+aiosmtplib==4.0.2

@@ -14,10 +14,11 @@ class StoreQuery(BaseModel):
 
 
 class NearbyStoreQuery(BaseModel):
-    lat: float = Field(..., ge=-90, le=90, description="위도 (EPSG:4326)")
-    lng: float = Field(..., ge=-180, le=180, description="경도 (EPSG:4326)")
-    radius_m: int = Field(1000, ge=1, le= 5000, description="반경(m), 기본 1km, 최대 5km")
-
+    min_lat: float = Field(..., ge=-90, le=90, description="남서쪽 위도")
+    min_lng: float = Field(..., ge=-180, le=180, description="남서쪽 경도")
+    max_lat: float = Field(..., ge=-90, le=90, description="북동쪽 위도")
+    max_lng: float = Field(..., ge=-180, le=180, description="북동쪽 경도")
+    limit: int = Field(300, ge=1, le=1000, description="최대 건수")
 
 class StoreResponse(BaseModel):
     id: int = Field(description="판매점 고유 ID")

@@ -3,7 +3,7 @@ services:
     image: postgis/postgis:16-3.4
     container_name: lotto-map-postgresql
     env_file:
-      - .env.dev
+      - .env
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
@@ -19,40 +19,55 @@ services:
       timeout: 5s
       retries: 10
 
-  api:
+  bootstrap:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lotto-map-api
+    image: lotto-map-backend:dev
+    container_name: lotto-map-bootstrap
     env_file:
-      - .env.dev
+      - .env
     environment:
       DB_HOST: db
+    command: ["python", "-m", "app.jobs.bootstrap"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: lotto-map-backend:dev
+    container_name: lotto-map-api
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./app:/app/app
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+      bootstrap:
+        condition: service_started
+    restart: unless-stopped
 
-  bootstrap:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: lotto-map-bootstrap
+  scheduler:
+    image: lotto-map-backend:dev
+    container_name: lotto-map-scheduler
     env_file:
-      - .env.dev
+      - .env
     environment:
       DB_HOST: db
-      LOTTO_LATEST: ${LOTTO_LATEST:-1189}
+    command: ["python", "-m", "app.jobs.scheduler"]
     depends_on:
       db:
         condition: service_healthy
-    restart: "no"
-    command: >
-      sh -c "python -m app.jobs.bootstrap
-      --lotto-latest $$LOTTO_LATEST
-      --continue-on-error"
+      bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   pgdata:

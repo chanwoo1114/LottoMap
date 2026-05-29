@@ -1,73 +1,72 @@
-import { useEffect, useRef, useState } from 'react';
-import mapboxgl from 'mapbox-gl'
-import MapboxLanguage from '@mapbox/mapbox-gl-language';
-import 'mapbox-gl/dist/mapbox-gl.css';
-
+import { useEffect, useRef } from 'react';
+import { useGeolocation } from './hooks/useGeolocation';
+import { BiCurrentLocation } from "react-icons/bi";
+import { useStoresInBounds } from './hooks/useStoresInBounds';
+import { useKakaoMap } from './hooks/useKakaoMap';
+import { StoreList } from '@/features/store/components/StoreList';
 
 export function MapScreen() {
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const [location, setLocation] = useState({ lng: 126.977139, lat: 37.565694 });
+  const followRef = useRef(true)
+  const location = useGeolocation();
+  const myMarkerRef = useRef<kakao.maps.CustomOverlay | null>(null);
+  const { containerRef, map } = useKakaoMap();
+  const { stores, selectedStore, setSelectedStore } = useStoresInBounds(map);
 
-  // 지도 초기화
+  // 현재 위치로 이동
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    if (!map) return;
+    const pos = new kakao.maps.LatLng(location.lat, location.lng);
+    if (myMarkerRef.current) {
+      myMarkerRef.current.setPosition(pos);
+    } else {
+      const dot = document.createElement('div');
+      dot.className="h-4 w-4 rounded-full bg-red-500 border-[3px] border-white shadow-md"
 
-    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+      myMarkerRef.current = new kakao.maps.CustomOverlay({
+        position: pos,
+        content: dot,
+        map,
+      });
+    }
+    if (followRef.current) {
+      map.panTo(pos);
+    }
+  }, [map, location])
 
-    mapRef.current = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
-      center: [location.lng, location.lat],
-      zoom: 14,
-    });
-
-    mapRef.current.addControl(new MapboxLanguage({ defaultLanguage: 'ko' }));
-
-    return () => {
-      mapRef.current?.remove();
-    };
-  }, []);
-
-  // 현재 위치 호출
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (!map) return
+    const handleDragStart = () => { followRef.current = false; };
 
-    let cancelled = false;
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        if (cancelled) return;
-        setLocation({
-          lng: position.coords.longitude,
-          lat: position.coords.latitude,
-        });
-      },
-      (error) => {
-        console.error(error);
-      },
-      { timeout: 5000, maximumAge: 60000 },
-    );
+    kakao.maps.event.addListener(map, 'dragstart', handleDragStart);
+    return () => kakao.maps.event.removeListener(map, 'dragstart', handleDragStart);
+  }, [map]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // 내 현재 위치로 이동
+  const goToMyLocation = () => {
+    if (!map) return;
+    followRef.current = true;
+    map.panTo(new kakao.maps.LatLng(location.lat, location.lng));
 
-  // 위치 변경되면 지도 이동
-  useEffect(() => {
-    mapRef.current?.flyTo({ center: [location.lng, location.lat], zoom: 14 });
-  }, [location]);
-
-
-
+  }
+  
   return (
     <div className="flex h-full flex-col md:flex-row">
-      {/* ═══════════════════════ 사이드바 (데스크톱) / 헤더 (모바일) ═══════════════════════ */}
-      <aside className="">
-
+      {/* ══════════════════════ 사이드바 (데스크톱═) / 헤더 (모바일) ═══════════════════════ */}
+      <aside className="w-128 shrink-0 overflow-y-auto border-r border-gray-200 bg-white">
+        <StoreList
+          stores={stores}
+        />
       </aside>
       <div className="relative flex-1 overflow-hidden">
-        <div ref={mapContainerRef} className="h-full w-full" />
+        <div ref={containerRef} className="h-full w-full" />
+
+        <button
+          onClick={goToMyLocation}
+          className="absolute bottom-6 right-4 z-10 rounded-full bg-white p-3 shadow-md cursor-pointer hover:bg-gray-100 active:scale-95 transition"
+          aria-label="내 위치로 이동"
+        >
+          <BiCurrentLocation className="h-5 w-5"/>
+        </button>
       </div>
     </div>
   );

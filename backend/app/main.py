@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    stores, generator, predictions, lotto, pension,
+    stores, generator, predictions, lotto, pension, auth
 )
 
 logging.basicConfig(
@@ -49,3 +49,4 @@ app.include_router(generator.router)
 app.include_router(predictions.router)
 app.include_router(lotto.router)
 app.include_router(pension.router)
+app.include_router(auth.router)

@@ -1,4 +1,3 @@
-"""크롤러 공통 유틸 (HTTP/딜레이) + bootstrap_failures/worker_status 기록 함수."""
 import asyncio
 import logging
 import random
@@ -18,6 +17,7 @@ HEADERS = {
 
 
 async def get_client() -> httpx.AsyncClient:
+    '''초기 GET으로 세션 쿠키를 받아둔 AsyncClient 생성'''
     client = httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True)
     try:
         await client.get(BASE_URL)
@@ -26,12 +26,13 @@ async def get_client() -> httpx.AsyncClient:
     return client
 
 
-async def delay(lo: int = 5, hi: int = 11) -> None:
+async def delay(lo: int = 5, hi: int = 10) -> None:
+    '''5~10초 딜레이 생성'''
     await asyncio.sleep(random.randint(lo, hi))
 
 
 async def insert_bootstrap_failure(task_name: str, sub_key: str) -> None:
-    """실패 sub_key를 기록. UPSERT이며, 과거 resolved된 행은 resolved_at을 NULL로 되돌림."""
+    """실패 기록. UPSERT이며, 과거 resolved된 행은 resolved_at을 NULL로 되돌림."""
     pool = await get_pool()
     await pool.execute(
         """
@@ -46,7 +47,7 @@ async def insert_bootstrap_failure(task_name: str, sub_key: str) -> None:
 
 
 async def resolve_bootstrap_failure(task_name: str, sub_key: str) -> None:
-    """실패 해결됨으로 마킹 (soft delete)."""
+    """실패 해결됨으로 수정"""
     pool = await get_pool()
     await pool.execute(
         """
@@ -58,7 +59,7 @@ async def resolve_bootstrap_failure(task_name: str, sub_key: str) -> None:
 
 
 async def get_pending_bootstrap_failures(task_name: str) -> list[str]:
-    """재시도 대상 sub_key 리스트 (resolved_at IS NULL)."""
+    """재시도 대상 리스트 기져오기"""
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -69,31 +70,3 @@ async def get_pending_bootstrap_failures(task_name: str) -> list[str]:
         task_name,
     )
     return [r["sub_key"] for r in rows]
-
-
-async def update_worker_status(task_name: str, status: str) -> None:
-    """worker 정기 크롤 상태 갱신. status='success'|'failed'"""
-    pool = await get_pool()
-    if status == "success":
-        await pool.execute(
-            """
-            INSERT INTO worker_status (task_name, last_run_at, last_success_at, last_status)
-            VALUES ($1, NOW(), NOW(), 'success')
-            ON CONFLICT (task_name) DO UPDATE SET
-                last_run_at     = NOW(),
-                last_success_at = NOW(),
-                last_status     = 'success'
-            """,
-            task_name,
-        )
-    else:
-        await pool.execute(
-            """
-            INSERT INTO worker_status (task_name, last_run_at, last_status)
-            VALUES ($1, NOW(), 'failed')
-            ON CONFLICT (task_name) DO UPDATE SET
-                last_run_at = NOW(),
-                last_status = 'failed'
-            """,
-            task_name,
-        )
