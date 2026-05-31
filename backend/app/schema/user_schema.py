@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr, Field
 class SignupRequest(BaseModel):
     email: EmailStr = Field(description="이메일")
     password: str = Field(min_length=8, max_length=72, description="비밀번호")
+    nickname: str = Field(min_length=2, max_length=50, description="닉네임")
 
 
 class LoginRequest(BaseModel):
@@ -27,6 +28,7 @@ class TokenResponse(BaseModel):
 class EmailSendRequest(BaseModel):
     email: EmailStr = Field(description="인증 코드 받을 이메일")
 
+
 class EmailVerifyRequest(BaseModel):
     email: EmailStr
-    code: str = Field(min_lenth=6, max_lenth=6,  pattern=r"^\d{6}$", description="6자리 숫자 코드")
+    code: str = Field(min_length=6, max_length=6,  pattern=r"^\d{6}$", description="6자리 숫자 코드")

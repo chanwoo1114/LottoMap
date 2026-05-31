@@ -24,13 +24,18 @@ async def signup(req: SignupRequest, pool: asyncpg.Pool = Depends(get_pool)):
 @router.post(
     "/email/send",
     status_code = status.HTTP_204_NO_CONTENT,
-    summary="이메일 인증 코드 발송"
+    summary="이메일 인증 코드 발송",
 )
 async def send_email(req: EmailSendRequest, pool: asyncpg.Pool = Depends(get_pool)):
     return await auth_service.send_email_code(pool, req.email)
 
-
-
+@router.post(
+    "/email/verify",
+    status_code = status.HTTP_204_NO_CONTENT,
+    summary="이메일 인증 코드 검증",
+)
+async def verify_email(req: EmailVerifyRequest, pool: asyncpg.Pool = Depends(get_pool)):
+    return await auth_service.verify_email_code(pool, req.email, req.code)
 
 @router.post(
     "/login",
