@@ -9,7 +9,6 @@ export function LoginForm({
   onClose: () => void;
   onSwitchToSignup: () => void;
 }) {
-  const { setSession } = useAuth()
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const inputClass = "rounded-lg border border-border px-3 py-2 outline-none focus:border-emerald-500";

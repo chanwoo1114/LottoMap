@@ -1,11 +1,11 @@
 import asyncpg
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.database import get_pool
 from app.schema.user_schema import (
     KakaoLoginRequest, LoginRequest, RefreshRequest,
     SignupRequest, TokenResponse, EmailSendRequest,
-    EmailVerifyRequest
+    EmailVerifyRequest, NicknameCheckResponse
 )
 from app.services import auth_service
 
@@ -20,6 +20,18 @@ router = APIRouter(prefix="/auth", tags=['인증'])
 )
 async def signup(req: SignupRequest, pool: asyncpg.Pool = Depends(get_pool)):
     return await auth_service.signup(pool, req)
+
+@router.get(
+    "/nickname/check",
+    response_model=NicknameCheckResponse,
+    summary="닉네임 중복 검사",
+)
+async def check_nickname(
+    nickname: str = Query(min_length=2, max_length=50, description="검사할 닉네임"),
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    available = await auth_service.check_nickname_available(pool, nickname)
+    return NicknameCheckResponse(available=available)
 
 @router.post(
     "/email/send",

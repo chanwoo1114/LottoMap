@@ -17,6 +17,10 @@ export interface TokenResponse {
   token_type: string;
 }
 
+export interface NicknameCheckResponse {
+  available: boolean;
+}
+
 // 이메일 로그인
 export const login = (body: LoginRequest) =>
   api.post<TokenResponse>('/auth/login', body).then((r) => r.data);
@@ -32,3 +36,7 @@ export const sendEmailCode = (email: string) =>
 // 인증 코드 검증
 export const verifyEmailCode = (email: string, code: string) =>
   api.post('/auth/email/verify', { email, code }).then(() => undefined);
+
+// 닉네임 중복 검사
+export const checkNickname = (nickname: string) =>
+  api.get<NicknameCheckResponse>('/auth/nickname/check', {params: {nickname}}).then((r) => r.data);

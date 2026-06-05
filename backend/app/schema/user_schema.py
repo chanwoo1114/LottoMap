@@ -32,3 +32,7 @@ class EmailSendRequest(BaseModel):
 class EmailVerifyRequest(BaseModel):
     email: EmailStr
     code: str = Field(min_length=6, max_length=6,  pattern=r"^\d{6}$", description="6자리 숫자 코드")
+
+
+class NicknameCheckResponse(BaseModel):
+    available: bool = Field(description="사용 가능 여부")

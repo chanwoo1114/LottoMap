@@ -53,10 +53,26 @@ async def _ensure_email_available(pool: asyncpg.Pool, email: str) -> None:
         )
 
 
+async def _ensure_nickname_available(pool: asyncpg.Pool, nickname: str) -> None:
+    """닉네임이 사용 가능한지 확인"""
+    if await pool.fetchval("SELECT 1 FROM users WHERE nickname = $1", nickname):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 사용 중인 닉네임입니다.",
+        )
+
+
+async def check_nickname_available(pool: asyncpg.Pool, nickname: str) -> bool:
+    """닉네임 중복 검사 (사용 가능하면 True)"""
+    exists = await pool.fetchval("SELECT 1 FROM users WHERE nickname = $1", nickname)
+    return not exists
+
+
 async def signup(pool: asyncpg.Pool, req: SignupRequest) -> TokenResponse:
     # 회원가입
     await _ensure_email_verified(pool, req.email)
     await _ensure_email_available(pool, req.email)
+    await _ensure_nickname_available(pool, req.nickname)
 
     user_id = await pool.fetchval(
         """INSERT INTO users (email, password, nickname) VALUES ($1, $2, $3) RETURNING id""",
