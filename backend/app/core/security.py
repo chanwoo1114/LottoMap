@@ -16,7 +16,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 def create_access_token(user_id: int) -> str:
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": user_id,
+        "sub": str(user_id),
         "type": "access",
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -28,3 +28,18 @@ def hash_token(token: str) -> str:
 
 def generate_refresh_token() -> str:
     return secrets.token_urlsafe(48)
+
+def decode_access_token(token: str) -> int:
+    """access 토근 검증"""
+    try:
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
+
+    except jwt.PyJWTError:
+        raise ValueError("유효하지 않은 토큰입니다.")
+
+    if payload.get("type") != "access":
+        raise ValueError("access 토큰이 아닙니다.")
+
+    return int(payload["sub"])
