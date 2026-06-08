@@ -26,3 +26,10 @@ api.interceptors.response.use(
         return Promise.reject(error);
     },
 );
+
+// 응답이 온 에러(401·403·409 등)는 위 인터셉터가 message를 한국어로 정규화해둠 → 그대로 사용.
+// 응답 자체가 없으면(네트워크·타임아웃) fallback 문구.
+export function getApiErrorMessage(err: unknown, fallback = '요청 처리에 실패했습니다.'): string {
+    if (axios.isAxiosError(err) && err.response) return err.message;
+    return fallback;
+}

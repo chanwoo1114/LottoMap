@@ -8,7 +8,10 @@ export type EmailVerifyStatus =
   | 'verifying'  // 코드 확인 중
   | 'verified';  // 인증 완료
 
-export function useEmailVerification(email: string) {
+export function useEmailVerification(
+  email: string,
+  sendFn: (email: string) => Promise<void> = sendEmailCode,
+) {
   const [status, setStatus] = useState<EmailVerifyStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [prevEmail, setPrevEmail] = useState(email);
@@ -24,7 +27,7 @@ export function useEmailVerification(email: string) {
     setError(null);
     setStatus('sending');
     try {
-      await sendEmailCode(email.trim());
+      await sendFn(email.trim());
       setStatus('sent');
     } catch (err) {
       setStatus('idle');

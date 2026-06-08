@@ -1,21 +1,50 @@
 import { useState, type FormEvent } from 'react';
+import axios from 'axios';
 import {useAuth} from "@/features/auth/AuthContext.tsx";
-
+import { login } from '../api';
+import { SocialButtons } from './SocialButtons';
 
 export function LoginForm({
   onClose,
   onSwitchToSignup,
+  onSwitchToReset,
 } : {
   onClose: () => void;
   onSwitchToSignup: () => void;
+  onSwitchToReset: () => void;
 }) {
+  const { setSession } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
   const inputClass = "rounded-lg border border-border px-3 py-2 outline-none focus:border-emerald-500";
   const linkClass = "cursor-pointer text-gray-500 hover:text-gray-700 hover:underline"
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
 
+  const emailInvalid = email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const canSubmit = email !== "" && password !== "" && !emailInvalid && !loading;
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+
+    setError(null);
+    setLoading(true);
+
+    try {
+      const tokens = await login({email, password});
+      setSession(tokens);
+      onClose();
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response) {
+        setError(err.message);
+      } else {
+        setError("네트워크 연결을 확인해주세요.");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -27,8 +56,11 @@ export function LoginForm({
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="email"
           placeholder="이메일"
-          className={inputClass}
+          className={`${inputClass} ${emailInvalid ? "border-red-500 focus:border-red-500" : ""}`}
         />
+        {emailInvalid && (
+          <span className="px-1 text-red-500">이메일 형식이 올바르지 않습니다.</span>
+        )}
       </label>
 
       <label className="flex flex-col gap-1 text-sm">
@@ -42,23 +74,22 @@ export function LoginForm({
         />
       </label>
 
+      {error && (
+        <p className="text-sm text-red-500">{error}</p>
+      )}
+
       <button
         type="submit"
-        className="cursor-pointer flex flex-col rounded-lg bg-emerald-500 py-2.5 font-medium text-white transition hover:opacity-90 active:scale-[0.99]"
+        disabled={!canSubmit}
+        className="cursor-pointer flex flex-col items-center rounded-lg bg-emerald-500 py-2.5 font-medium text-white transition hover:opacity-90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
       >
-        로그인
+        {loading ? "로그인 중…" : "로그인"}
       </button>
 
       <div className="flex items-center justify-center gap-3 text-sm text-gray-500">
         <button
           type="button"
-          className={linkClass}
-        >
-          이메일 찾기
-        </button>
-        <span className="text-gray-300">|</span>
-        <button
-          type="button"
+          onClick={onSwitchToReset}
           className={linkClass}
         >
           비밀번호 찾기
@@ -73,6 +104,7 @@ export function LoginForm({
         </button>
       </div>
 
+      <SocialButtons onClose={onClose} />
     </form>
   )
 }

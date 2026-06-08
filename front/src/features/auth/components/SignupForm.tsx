@@ -3,6 +3,7 @@ import { useAuth } from '../AuthContext';
 import { signup } from '../api';
 import { useNicknameCheck } from '../hooks/useNicknameCheck';
 import { useEmailVerification } from '../hooks/useEmailVerification';
+import { SocialButtons } from './SocialButtons';
 
 export function SignupForm({
   onClose,
@@ -14,12 +15,13 @@ export function SignupForm({
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const emailVerify = useEmailVerification(email);
   const [password1, setPassword1] = useState("");
   const [password2, setPassword2] = useState("");
   const [nickname, setNickname] = useState("");
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const emailVerify = useEmailVerification(email);
 
   const emailInvalid = email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const passwordInvalid =
@@ -34,8 +36,7 @@ export function SignupForm({
   const showCodeInput =
     !emailVerify.verified &&
     (emailVerify.status === 'sent' || emailVerify.status === 'verifying');
-  
-  // 이메일 인증 완료 후 나머지 활성화
+
   const fieldsEnabled = emailVerify.verified
 
   const borderClass = (invalid: boolean) =>
@@ -47,6 +48,8 @@ export function SignupForm({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+
+
   };
 
   return (
@@ -172,6 +175,8 @@ export function SignupForm({
           로그인
         </button>
       </p>
+
+      <SocialButtons onClose={onClose} />
     </form>
   );
 }
