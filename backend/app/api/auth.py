@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.core.database import get_pool
 from app.schema.user_schema import (
-    KakaoLoginRequest, LoginRequest, RefreshRequest,
+    SocialLoginRequest, SocialProvider, LoginRequest, RefreshRequest,
     SignupRequest, TokenResponse, EmailSendRequest,
-    EmailVerifyRequest, NicknameCheckResponse
+    EmailVerifyRequest, NicknameCheckResponse,
+    PasswordResetRequest
 )
 from app.services import auth_service
 
@@ -56,3 +57,32 @@ async def verify_email(req: EmailVerifyRequest, pool: asyncpg.Pool = Depends(get
 )
 async def login(req: LoginRequest, pool: asyncpg.Pool = Depends(get_pool)):
     return await auth_service.login(pool, req)
+
+@router.post(
+    "/password/email/send",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="비밀번호 재설정 코드 발송"
+)
+async def send_password_reset(req: EmailSendRequest, pool: asyncpg.Pool = Depends(get_pool)):
+    return await auth_service.send_password_reset_code(pool, req.email)
+
+@router.post(
+    "/password/reset",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="비밀번호 재설정",
+)
+async def reset_password(req: PasswordResetRequest, pool: asyncpg.Pool =
+Depends(get_pool)):
+    return await auth_service.reset_password(pool, req.email, req.password)
+
+@router.post(
+  "/social/{provider}",
+  response_model=TokenResponse,
+  summary="소셜 로그인 (kakao/naver/google)",
+)
+async def social_login(
+  provider: SocialProvider,
+  req: SocialLoginRequest,
+  pool: asyncpg.Pool = Depends(get_pool),
+):
+  return await auth_service.social_login(pool, provider.value, req.access_token)

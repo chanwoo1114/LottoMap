@@ -1,4 +1,12 @@
 from pydantic import BaseModel, EmailStr, Field
+from enum import Enum
+
+
+class SocialProvider(str, Enum):
+    kakao = "kakao"
+    naver = "naver"
+    google = "google"
+
 
 class SignupRequest(BaseModel):
     email: EmailStr = Field(description="이메일")
@@ -9,10 +17,6 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-
-
-class KakaoLoginRequest(BaseModel):
-    access_token: str = Field(description="카카오 JS SDK로 발급받은 access token")
 
 
 class RefreshRequest(BaseModel):
@@ -36,3 +40,12 @@ class EmailVerifyRequest(BaseModel):
 
 class NicknameCheckResponse(BaseModel):
     available: bool = Field(description="사용 가능 여부")
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr = Field(description="비밀번호를 재설정할 이메일")
+    password: str = Field(min_length=8, max_length=72, description="새 비밀번호")
+
+
+class SocialLoginRequest(BaseModel):
+    access_token: str = Field(description="소셜 제공자 Access Token")

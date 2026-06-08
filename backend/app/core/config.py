@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "복권지도"
 
     EMAIL_CODE_TTL_MINUTES: int = 5
-    EMAIL_CODE_RESEND_COOLDOWN_SECONDS: int = 60
+    EMAIL_CODE_RESEND_COOLDOWN_SECONDS: int = 180
     EMAIL_CODE_MAX_ATTEMPTS: int = 5
+    EMAIL_CODE_MAX_EXHAUSTED_PER_DAY: int = 3
     EMAIL_VERIFIED_TTL_MINUTES: int = 30
 
     @property

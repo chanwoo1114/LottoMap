@@ -24,8 +24,8 @@ COMMENT ON COLUMN users.is_active IS '활성 여부';
 CREATE TABLE user_oauth (
   id           SERIAL PRIMARY KEY,
   user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  provider     VARCHAR(20) NOT NULL,
-  provider_uid VARCHAR(100) NOT NULL,
+  provider     VARCHAR(20) NOT NULL CHECK (provider IN ('kakao', 'naver', 'google')),
+  provider_uid VARCHAR(255) NOT NULL,
   created_at   TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (provider, provider_uid)
 );
@@ -33,8 +33,8 @@ CREATE TABLE user_oauth (
   CREATE INDEX ix_user_oauth_user ON user_oauth (user_id);
 
 COMMENT ON TABLE  user_oauth IS '소셜 로그인 연결';
-COMMENT ON COLUMN user_oauth.provider IS '소셜 제공자 (kako, naver, google)';
-COMMENT ON COLUMN user_oauth.provider_uid IS '카카오 회원번호 ID';
+COMMENT ON COLUMN user_oauth.provider IS '소셜 제공자 (kakao, naver, google)';
+COMMENT ON COLUMN user_oauth.provider_uid IS '제공자별 사용자 고유 ID';
 
 
 CREATE TABLE refresh_tokens (
@@ -66,8 +66,8 @@ CREATE TABLE email_verifications (
 CREATE INDEX ix_email_verif_recent
     ON email_verifications (email, created_at DESC);
 
-COMMENT ON TABLE  email_verifications IS '회원가입 이메일 인증 코드';
-COMMENT ON COLUMN email_verifications.code_hash IS '6자리 코드 해시';
+COMMENT ON TABLE  email_verifications IS '이메일 인증 코드 (회원가입·비번재설정 공용)';
+COMMENT ON COLUMN email_verifications.code IS '6자리 코드 해시';
 COMMENT ON COLUMN email_verifications.expires_at IS '코드 만료 시각';
 COMMENT ON COLUMN email_verifications.verified_at IS '검증 성공 시각';
 COMMENT ON COLUMN email_verifications.attempts IS '검증 시도 횟수';
