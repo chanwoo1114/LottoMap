@@ -10,6 +10,7 @@ StatStrategy = Literal[
 
 
 class StatisticalQuery(BaseModel):
+    """통계 기반 번호 생성 요청"""
     strategy: StatStrategy = Field("balanced", description="번호 생성 전략")
     count: int = Field(5, ge=1, le=10, description="생성할 세트 수 (1~10)")
     exclude: list[int] | None = Field(None, description="제외할 번호 목록")
@@ -17,6 +18,7 @@ class StatisticalQuery(BaseModel):
 
 
 class AIQuery(BaseModel):
+    """AI 기반 번호 생성 요청"""
     count: int = Field(5, ge=1, le=10, description="생성할 세트 수 (1~10)")
     temperature: float = Field(1.5, gt=0, le=3.0, description="샘플링 온도 (낮을수록 결정적)")
     exclude: list[int] | None = Field(None, description="제외할 번호 목록")
@@ -27,6 +29,7 @@ PensionStrategy = Literal["hot", "cold", "balanced", "random"]
 
 
 class PensionQuery(BaseModel):
+    """연금복권 번호 생성 요청"""
     strategy: PensionStrategy = Field("balanced", description="번호 생성 전략")
     count: int = Field(5, ge=1, le=10, description="생성할 세트 수 (1~10)")
     fixed_group: int | None = Field(None, ge=1, le=5, description="조 고정 (1~5), 미지정 시 통계 기반 선택")
@@ -45,5 +48,6 @@ class GeneratorResult(BaseModel):
 
 
 class GeneratorResponse(BaseModel):
+    """번호 생성 결과 응답"""
     results: list[dict]
     count: int

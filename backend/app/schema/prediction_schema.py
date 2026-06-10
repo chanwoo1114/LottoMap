@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 
 class PredictionItem(BaseModel):
+    """개별 예측 번호 항목"""
     id: int
     model: str
     strategy: str | None = None
@@ -16,6 +17,7 @@ class PredictionItem(BaseModel):
 
 
 class RoundPredictions(BaseModel):
+    """회차별 예측 모음 및 실제 추첨 결과 응답"""
     target_round: int
     draw_date: date | None = None
     winning_numbers: list[int] | None = None

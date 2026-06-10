@@ -6,6 +6,7 @@ _TIMEOUT = 10
 
 
 class SocialProfile(BaseModel):
+    """소셜 제공자에서 조회한 사용자 프로필 정보."""
     provider: str
     uid: str
     email: str | None = None
@@ -14,6 +15,7 @@ class SocialProfile(BaseModel):
 
 
 async def _get(url:str, access_token: str) -> dict:
+    """access_token으로 소셜 API에 GET 요청 후 JSON 응답 반환."""
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.get(
@@ -38,6 +40,7 @@ async def _get(url:str, access_token: str) -> dict:
     return resp.json()
 
 async def _kakao(access_token: str) -> SocialProfile:
+    """카카오 userinfo를 조회해 SocialProfile로 변환."""
     data = await _get("https://kapi.kakao.com/v2/user/me", access_token)
     account = data.get("kakao_account") or {}
     profile = account.get("profile") or {}
@@ -51,6 +54,7 @@ async def _kakao(access_token: str) -> SocialProfile:
 
 
 async def _naver(access_token: str) -> SocialProfile:
+    """네이버 userinfo를 조회해 SocialProfile로 변환."""
     data = await _get("https://openapi.naver.com/v1/nid/me", access_token)
     r = data.get("response") or {}
     return SocialProfile(
@@ -63,6 +67,7 @@ async def _naver(access_token: str) -> SocialProfile:
 
 
 async def _google(access_token: str) -> SocialProfile:
+    """구글 userinfo를 조회해 SocialProfile로 변환."""
     data = await _get("https://www.googleapis.com/oauth2/v3/userinfo", access_token)
     return SocialProfile(
         provider="google",

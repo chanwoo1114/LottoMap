@@ -35,11 +35,15 @@ def decode_access_token(token: str) -> int:
         payload = jwt.decode(
             token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
         )
-
+    except jwt.ExpiredSignatureError:
+        raise ValueError("만료된 토큰입니다.")
     except jwt.PyJWTError:
         raise ValueError("유효하지 않은 토큰입니다.")
 
     if payload.get("type") != "access":
         raise ValueError("access 토큰이 아닙니다.")
 
-    return int(payload["sub"])
+    sub = payload.get("sub")
+    if sub is None:
+        raise ValueError("토큰에 사용자 정보가 없습니다.")
+    return int(sub)

@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     stores, generator, predictions, lotto, pension, auth
 )
+from app.core.database import get_pool, close_pool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,16 +17,25 @@ logging.basicConfig(
 logger = logging.getLogger("api")
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """앱 시작 시 DB 풀을 미리 생성하고, 종료 시 정리한다."""
+    await get_pool()
+    yield
+    await close_pool()
+
+
 app = FastAPI(
     title="복권지도 API",
     description="동행복권 기반 복권 판매점 지도 서비스",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

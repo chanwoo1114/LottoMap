@@ -5,7 +5,7 @@ from datetime import date
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import BASE_URL, get_client
+from app.crawlers.common import BASE_URL, client_session, get_client
 
 logger = logging.getLogger(__name__)
 
@@ -172,11 +172,8 @@ async def crawl_and_save_speetto() -> dict:
     logger.info("[START] crawl_speetto")
 
     try:
-        client = await get_client()
-        try:
+        async with client_session() as client:
             games = await crawl_speetto_onsale(client)
-        finally:
-            await client.aclose()
 
         upserted = await save_speetto_to_db(games)
         logger.info(f"[END] crawl_speetto: upserted={upserted}")

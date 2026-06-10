@@ -15,9 +15,11 @@ STRATEGIES = ("hot", "cold", "balanced", "random")
 
 
 class PensionGenerator:
+    """역대 1등 통계 기반 연금복권 720+ 번호 생성기"""
     RECENT_WINDOW = 30
 
     def __init__(self) -> None:
+        """레코드·조/자리별 빈도 카운터 초기화"""
         self._records: list[tuple[int, int, str]] = []  # (round_no, group, number)
         self._group_freq: Counter = Counter()
         self._digit_freq: list[Counter] = [Counter() for _ in range(NUM_LEN)]
@@ -25,6 +27,7 @@ class PensionGenerator:
         self._loaded = False
 
     async def load_data(self, pool: asyncpg.Pool) -> None:
+        """역대 1등 데이터를 적재해 조·자리별 빈도 집계"""
         rows = await pool.fetch(
             """
             SELECT round_no, first_prize_group, first_prize_number
@@ -52,6 +55,7 @@ class PensionGenerator:
         self._loaded = True
 
     def _group_weights(self, strategy: str) -> dict[int, float]:
+        """전략별 조(組) 추첨 가중치 계산"""
         if strategy == "random" or not self._group_freq:
             return {g: 1.0 for g in GROUPS}
         mx = max(self._group_freq.values()) or 1
@@ -62,6 +66,7 @@ class PensionGenerator:
         return {g: self._group_freq.get(g, 0) / mx + 0.2 for g in GROUPS}
 
     def _digit_weights(self, strategy: str) -> list[dict[int, float]]:
+        """전략별 각 자리 숫자 추첨 가중치 계산"""
         result = []
         for pos in range(NUM_LEN):
             total_c = self._digit_freq[pos]
@@ -86,6 +91,7 @@ class PensionGenerator:
         count: int = 5,
         fixed_group: int | None = None,
     ) -> list[dict]:
+        """전략 가중치로 조·6자리 번호 조합 생성"""
         if not self._loaded:
             await self.load_data(pool)
         if not self._records:
@@ -131,6 +137,7 @@ class PensionGenerator:
         return results
 
     async def get_analysis(self, pool: asyncpg.Pool) -> dict:
+        """조 분포·자리별 상위 숫자 등 통계 분석 반환"""
         if not self._loaded:
             await self.load_data(pool)
         if not self._records:

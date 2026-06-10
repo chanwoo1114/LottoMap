@@ -5,7 +5,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client,
+    BASE_URL, client_session, delay,
     insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 from app.crawlers.regions import CTPV_MAP
@@ -152,8 +152,7 @@ async def crawl_all_stores() -> dict:
     total_upserted = 0
     total = 0
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         # 1페이지를 먼저 받아 total(전국 총 건수) 확보
         first = await _fetch_page(client, 1)
         total = int(first.get("total") or 0)
@@ -219,8 +218,6 @@ async def crawl_all_stores() -> dict:
             page += 1
         else:
             logger.warning(f"[STORES] max_page({max_page}) 도달 — 비정상 종료")
-    finally:
-        await client.aclose()
 
     # 폐업 처리: 크롤이 충분히 완전했을 때만 (대량 오폐업 방지)
     closed_count = 0
@@ -268,8 +265,7 @@ async def retry_stores_sub_keys(sub_keys: list[str]) -> dict:
     resolved: list[str] = []
     still_failed: list[str] = []
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         for sub_key in sub_keys:
             if not sub_key.startswith("page:"):
                 logger.warning(f"[RETRY] stores 미지원 sub_key (legacy?): {sub_key}")
@@ -296,8 +292,6 @@ async def retry_stores_sub_keys(sub_keys: list[str]) -> dict:
                 still_failed.append(sub_key)
                 logger.warning(f"[RETRY] stores {sub_key} 여전히 실패: {e}")
             await delay()
-    finally:
-        await client.aclose()
 
     logger.info(
         f"[RETRY] stores: resolved={len(resolved)}, still_failed={len(still_failed)}"

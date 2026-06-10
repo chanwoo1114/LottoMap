@@ -1,23 +1,14 @@
 import { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { AuthModal } from './AuthModal';
+import { UserMenu } from './UserMenu';
 
-
-export function LoginButton() {
-  const { isAuthenticated, logout } = useAuth();
+export function LoginButton(
+) {
+  const { isAuthenticated } = useAuth();
   const [open, setOpen] = useState(false);
 
-  if (isAuthenticated) {
-    return (
-      <button
-        type="button"
-        onClick={logout}
-        className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-      >
-        로그아웃
-      </button>
-    )
-  }
+  if (isAuthenticated) return <UserMenu />;
 
   return (
     <>

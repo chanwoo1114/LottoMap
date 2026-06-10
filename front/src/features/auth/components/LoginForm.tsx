@@ -3,6 +3,9 @@ import axios from 'axios';
 import {useAuth} from "@/features/auth/AuthContext.tsx";
 import { login } from '../api';
 import { SocialButtons } from './SocialButtons';
+import { Button } from '@/components/ui/Button'
+import { TextField } from '@/components/ui/TextField'
+import { isValidEmail } from '../validation'
 
 export function LoginForm({
   onClose,
@@ -19,10 +22,7 @@ export function LoginForm({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const inputClass = "rounded-lg border border-border px-3 py-2 outline-none focus:border-emerald-500";
-  const linkClass = "cursor-pointer text-gray-500 hover:text-gray-700 hover:underline"
-
-  const emailInvalid = email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const emailInvalid = email !== "" && !isValidEmail(email);
   const canSubmit = email !== "" && password !== "" && !emailInvalid && !loading;
 
   const handleSubmit = async (e: FormEvent) => {
@@ -49,59 +49,40 @@ export function LoginForm({
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-      <label className="flex flex-col gap-1 text-sm">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-          placeholder="이메일"
-          className={`${inputClass} ${emailInvalid ? "border-red-500 focus:border-red-500" : ""}`}
-        />
-        {emailInvalid && (
-          <span className="px-1 text-red-500">이메일 형식이 올바르지 않습니다.</span>
-        )}
-      </label>
+      <TextField
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        autoComplete="email"
+        placeholder="이메일"
+        invalid={emailInvalid}
+        error={emailInvalid ? "이메일 형식이 올바르지 않습니다." : undefined}
+      />
 
-      <label className="flex flex-col gap-1 text-sm">
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-          placeholder="비밀번호"
-          className={inputClass}
-        />
-      </label>
+      <TextField
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        autoComplete="current-password"
+        placeholder="비밀번호"
+      />
 
       {error && (
         <p className="text-sm text-red-500">{error}</p>
       )}
 
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="cursor-pointer flex flex-col items-center rounded-lg bg-emerald-500 py-2.5 font-medium text-white transition hover:opacity-90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!canSubmit}>
         {loading ? "로그인 중…" : "로그인"}
-      </button>
+      </Button>
 
       <div className="flex items-center justify-center gap-3 text-sm text-gray-500">
-        <button
-          type="button"
-          onClick={onSwitchToReset}
-          className={linkClass}
-        >
+        <Button variant="link" onClick={onSwitchToReset}>
           비밀번호 찾기
-        </button>
+        </Button>
         <span className="text-gray-300">|</span>
-        <button
-          type="button"
-          onClick={onSwitchToSignup}
-          className={linkClass}
-        >
+        <Button variant="link" onClick={onSwitchToSignup}>
           회원가입
-        </button>
+        </Button>
       </div>
 
       <SocialButtons onClose={onClose} />

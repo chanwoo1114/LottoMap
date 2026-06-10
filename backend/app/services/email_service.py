@@ -4,6 +4,7 @@ from email.message import EmailMessage
 from app.core.config import settings
 
 def _build_message(to: str, subject: str, html:str, text:str) -> EmailMessage:
+    """텍스트·HTML 본문을 담은 이메일 메시지를 생성."""
     msg = EmailMessage()
     msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_USER}>"
     msg["To"] = to
@@ -14,6 +15,7 @@ def _build_message(to: str, subject: str, html:str, text:str) -> EmailMessage:
 
 
 async def send_verification_code(to: str, code: str) -> None:
+    """이메일 인증 코드를 SMTP로 발송."""
     subject = "[복권지도] 이메일 인증 코드"
     text = (
         f"인증 코드: {code}\n"

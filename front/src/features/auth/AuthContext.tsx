@@ -1,10 +1,12 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { tokenStore } from './storage';
-import type { TokenResponse } from './api';
+import { setOnSessionExpired } from '@/lib/api';
+import { getMe, type AuthResponse, type UserResponse } from './api';
 
 interface AuthState {
   isAuthenticated: boolean;
-  setSession: (tokens: TokenResponse) => void;
+  user: UserResponse | null;
+  setSession: (auth: AuthResponse) => void;
   logout: () => void;
 }
 
@@ -12,24 +14,39 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!tokenStore.getAccess());
-  // const [isAuthenticated, setIsAuthenticated] = useState(true)
+  const [user, setUser] = useState<UserResponse | null>(null);
 
-  const setSession = (tokens: TokenResponse) => {
+  const setSession = (auth: AuthResponse) => {
     tokenStore.save({
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
+      accessToken: auth.access_token,
+      refreshToken: auth.refresh_token,
     });
     setIsAuthenticated(true);
+    setUser(auth.user);
   };
 
   const logout = () => {
     tokenStore.clear();
     setIsAuthenticated(false);
+    setUser(null);
   };
 
+  useEffect(() => {
+    if (!tokenStore.getAccess()) return;
+    getMe()
+      .then(setUser)
+      .catch(() => setUser(null));
+  }, []);
+
+  useEffect(() => {
+    setOnSessionExpired(() => {
+      setIsAuthenticated(false);
+      setUser(null);
+    });
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, setSession, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, setSession, logout }}>
       {children}
     </AuthContext.Provider>
   );

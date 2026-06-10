@@ -1,19 +1,20 @@
 import math
 import random
 from collections import Counter, defaultdict
-from itertools import combinations
 
 import asyncpg
 
-TOTAL = 45; PICK = 6
-PRIMES = {2,3,5,7,11,13,17,19,23,29,31,37,41,43}
-SECTIONS = [(1,10),(11,20),(21,30),(31,40),(41,45)]
+from app.services.generators.lotto_common import (
+    TOTAL, PICK, calc_ac, count_consecutive_pairs, base_validate,
+)
 
 
 class AIGeneratorV3:
+    """앙상블 모델 기반 AI 로또 번호 생성기 v3"""
     MONTE_CARLO_N = 5000
 
     def __init__(self):
+        """모델 상태·앙상블 가중치 초기화"""
         self._rounds = []; self._trained = False
         self._trans = {}; self._cycle = {}; self._affinity = {}
         self._trend = {}; self._pos = {}
@@ -26,6 +27,7 @@ class AIGeneratorV3:
         self._backtest = {}
 
     async def train(self, pool: asyncpg.Pool):
+        """역대 당첨 데이터를 적재해 모든 서브모델 학습"""
         rows = await pool.fetch("SELECT round_no, num1, num2, num3, num4, num5, num6 FROM lotto_results ORDER BY round_no ASC")
         if len(rows) < 30: return
         self._rounds = [(r["round_no"], sorted([r["num1"],r["num2"],r["num3"],r["num4"],r["num5"],r["num6"]])) for r in rows]
@@ -52,6 +54,7 @@ class AIGeneratorV3:
         self._trans = {a: {b: c/sum(ct.values()) for b, c in ct.items()} for a, ct in tc.items()}
 
     def _train_cycle(self):
+        """번호별 출현 주기 평균·표준편차·미출현 기간 계산"""
         apps = defaultdict(list)
         for i, (_, nums) in enumerate(self._rounds):
             for n in nums: apps[n].append(i)
@@ -146,8 +149,7 @@ class AIGeneratorV3:
         """실제 당첨번호의 연번 쌍 수 분포 학습"""
         consec_counts = Counter()
         for _, nums in self._rounds:
-            sn = sorted(nums)
-            pairs = sum(1 for i in range(len(sn)-1) if sn[i+1] == sn[i]+1)
+            pairs = count_consecutive_pairs(sorted(nums))
             consec_counts[pairs] += 1
         t = len(self._rounds) or 1
         self._consec_dist = {k: v/t for k, v in consec_counts.items()}
@@ -186,6 +188,7 @@ class AIGeneratorV3:
         self._backtest = {"hits": {m: round(v, 2) for m, v in hits.items()}, "weights": {m: round(w, 4) for m, w in self._weights.items()}}
 
     def _markov(self, p1, p2):
+        """직전 2회 번호로 마르코프 전이 점수 산출"""
         sc = defaultdict(float)
         for a in p1:
             w = 1.3 if a in p2 else 1.0
@@ -194,6 +197,7 @@ class AIGeneratorV3:
         return {n: sc.get(n, 0.001)/t for n in range(1, TOTAL+1)}
 
     def _cyc_scores(self):
+        """출현 주기 대비 미출현 기간으로 번호별 점수 산출"""
         sc = {}
         for n in range(1, TOTAL+1):
             d = self._cycle.get(n, {"avg": 7.5, "std": 3.0, "since": 0})
@@ -205,6 +209,7 @@ class AIGeneratorV3:
         return {n: s/t for n, s in sc.items()}
 
     def _cluster_scores(self, picked):
+        """이미 뽑힌 번호와의 친화도로 동반 출현 점수 산출"""
         sc = {n: 1.0 for n in range(1, TOTAL+1)}
         for ex in picked:
             for pt, s in self._affinity.get(ex, {}).items():
@@ -213,6 +218,7 @@ class AIGeneratorV3:
         return {n: s/t for n, s in sc.items()}
 
     def _trend_scores(self):
+        """기울기·가속도 기반 최근 추세 점수 산출"""
         sc = {}
         for n in range(1, TOTAL+1):
             td = self._trend.get(n, {})
@@ -248,11 +254,11 @@ class AIGeneratorV3:
 
     def _consecutive_score(self, nums):
         """연번 쌍 수가 실제 분포에 부합하는 정도"""
-        sn = sorted(nums)
-        pairs = sum(1 for i in range(len(sn)-1) if sn[i+1] == sn[i]+1)
+        pairs = count_consecutive_pairs(sorted(nums))
         return self._consec_dist.get(pairs, 0.01)
 
     def _ensemble(self, p1, p2, picked, pos):
+        """모든 서브모델 점수를 가중 합산한 최종 번호 확률"""
         mk = self._markov(p1, p2); cy = self._cyc_scores(); cl = self._cluster_scores(picked)
         tr = self._trend_scores(); ps = self._pos.get(pos, {n: 1/TOTAL for n in range(1, TOTAL+1)})
         ga = self._gap_accel_scores()
@@ -268,6 +274,7 @@ class AIGeneratorV3:
         return {n: s/t for n, s in comb.items()}
 
     def _pick(self, scores, exclude, temp):
+        """온도 적용 소프트맥스 가중 추첨으로 번호 하나 선택"""
         cands = {n: s for n, s in scores.items() if n not in exclude and s > 0}
         if not cands: return random.choice([n for n in range(1, TOTAL+1) if n not in exclude])
         ns, raw = list(cands.keys()), [cands[n] for n in cands]
@@ -275,25 +282,18 @@ class AIGeneratorV3:
         return random.choices(ns, weights=[e/t for e in exp], k=1)[0]
 
     @staticmethod
-    def _calc_ac(nums): return len(set(abs(a-b) for a, b in combinations(nums, 2))) - (PICK-1)
+    def _calc_ac(nums):
+        """조합의 AC값(서로 다른 차이 개수) 계산"""
+        return calc_ac(nums)
 
     def _validate(self, nums):
-        s = sum(nums)
-        if not (95 <= s <= 180): return False
-        odds = sum(1 for n in nums if n % 2 == 1)
-        if odds <= 1 or odds >= 5: return False
-        if sum(1 for n in nums if n >= 23) in (0, 6): return False
+        """합·AC(고정범위) 검증 후 공통 구조 검증"""
+        if not (95 <= sum(nums) <= 180): return False
         if self._calc_ac(nums) < 6: return False
-        sn = sorted(nums); c = 1
-        for i in range(1, len(sn)):
-            c = c+1 if sn[i] == sn[i-1]+1 else 1
-            if c >= 4: return False
-        for s2, e in SECTIONS:
-            if sum(1 for n in nums if s2 <= n <= e) >= 4: return False
-        if max(Counter(n % 10 for n in nums).values()) >= 3: return False
-        return True
+        return base_validate(nums)
 
     async def generate(self, pool, count=5, temperature=1.5, exclude_numbers=None, include_numbers=None):
+        """몬테카를로 시뮬레이션으로 추천 조합 생성"""
         if not self._trained: await self.train(pool)
         if not self._rounds: return [{"error": "데이터 없음"}]
 
@@ -322,7 +322,7 @@ class AIGeneratorV3:
             seen.add(tuple(nums))
             odds = sum(1 for n in nums if n % 2 == 1)
             sn = sorted(nums)
-            consec_pairs = sum(1 for i in range(len(sn)-1) if sn[i+1] == sn[i]+1)
+            consec_pairs = count_consecutive_pairs(sn)
             results.append({
                 "numbers": nums,
                 "confidence": min(99, max(1, int(score*TOTAL*80))),
@@ -343,6 +343,7 @@ class AIGeneratorV3:
         return results
 
     async def get_full_insight(self, pool):
+        """추세·과열·갭가속 등 모델 인사이트 종합 반환"""
         if not self._trained: await self.train(pool)
         if not self._rounds: return {"error": "데이터 없음"}
         p1, p2 = self._rounds[-1][1], (self._rounds[-2][1] if len(self._rounds) >= 2 else self._rounds[-1][1])

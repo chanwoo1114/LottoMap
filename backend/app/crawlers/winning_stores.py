@@ -4,7 +4,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client,
+    BASE_URL, client_session, delay,
     insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 
@@ -27,8 +27,6 @@ _SPEETTO_HEADERS = {
 }
 
 _ST_GDS_CODE = {"st2000": "LP35", "st1000": "LP34", "st500": "LP33"}
-
-_SP_TYPE_CD = {"SP2000": "st2000", "SP1000": "st1000", "SP500": "st500"}
 
 _LOTTERY_TYPE = {
     "lt645": "lotto",
@@ -233,8 +231,7 @@ async def crawl_all_winning_stores(
         f"(범위: {min(speetto_rounds.get('st500') or [0])}~{max(speetto_rounds.get('st500') or [0])})"
     )
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         plan = [
             ("lt645", lotto_rounds),
             ("pt720", pension_rounds),
@@ -265,8 +262,6 @@ async def crawl_all_winning_stores(
                         logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
                     logger.warning(f"[WIN] {sub_key} 실패: {e}")
                 await delay(delay_lo, delay_hi)
-    finally:
-        await client.aclose()
 
     logger.info(
         f"[END] crawl_winning_stores: saved={total_saved}, failures={len(failures)}"
@@ -286,8 +281,7 @@ async def retry_winning_sub_keys(
     resolved: list[str] = []
     still_failed: list[str] = []
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         for sub_key in sub_keys:
             parts = sub_key.split("/")
             if len(parts) != 2:
@@ -323,8 +317,6 @@ async def retry_winning_sub_keys(
                 still_failed.append(sub_key)
                 logger.warning(f"[RETRY] winning {sub_key} 여전히 실패: {e}")
             await delay(delay_lo, delay_hi)
-    finally:
-        await client.aclose()
 
     logger.info(
         f"[RETRY] winning: resolved={len(resolved)}, still_failed={len(still_failed)}"

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Annotated
 import asyncpg
-import logging
 
 from app.core.database import get_pool
 from app.services import stores_service
@@ -9,8 +8,6 @@ from app.schema.store_schema import (
     StoreQuery, StoreResponse,
     NearbyStoreQuery,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/store", tags=["판매점"])
 

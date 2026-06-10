@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { sendEmailCode, verifyEmailCode} from "@/features/auth/api.ts";
 
 export type EmailVerifyStatus =

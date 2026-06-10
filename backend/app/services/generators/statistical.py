@@ -2,19 +2,19 @@
 import math
 import random
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import combinations
 
 import asyncpg
 
-TOTAL = 45
-PICK = 6
-PRIMES = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43}
-SECTIONS = [(1, 10), (11, 20), (21, 30), (31, 40), (41, 45)]
+from app.services.generators.lotto_common import (
+    TOTAL, PICK, SECTIONS, calc_ac, count_consecutive_pairs, base_validate,
+)
 
 
 @dataclass
 class NumberProfile:
+    """번호 하나의 빈도·주기·온도·스트릭 통계 프로필"""
     number: int; total_freq: int = 0; recent_freq: int = 0
     weighted_freq: float = 0.0; gap_since_last: int = 0
     avg_cycle: float = 0.0; cycle_std: float = 0.0
@@ -24,10 +24,12 @@ class NumberProfile:
 
 
 class StatisticalGeneratorV3:
+    """고도화 통계 기반 로또 번호 생성기 v3"""
     RECENT_WINDOW = 50
     STRATEGIES = ["hot", "cold", "balanced", "overdue", "pattern_match", "contrarian", "streak_based"]
 
     def __init__(self):
+        """프로필·패턴·PMI 등 통계 상태 초기화"""
         self.profiles: dict[int, NumberProfile] = {}
         self.pattern_sum_range = (100, 175)
         self.pattern_avg_sum = 0.0
@@ -42,6 +44,7 @@ class StatisticalGeneratorV3:
         self._loaded = False
 
     async def load_data(self, pool: asyncpg.Pool):
+        """역대 당첨 데이터를 적재해 프로필·패턴·PMI 구축"""
         rows = await pool.fetch("SELECT round_no, num1, num2, num3, num4, num5, num6 FROM lotto_results ORDER BY round_no ASC")
         if len(rows) < 20:
             return
@@ -52,6 +55,7 @@ class StatisticalGeneratorV3:
         self._loaded = True
 
     def _build_profiles(self):
+        """번호별 빈도·주기·온도·스트릭·끝수 프로필 구성"""
         total_rounds = len(self._rounds)
         appearances = defaultdict(list)
         for i, (_, nums) in enumerate(self._rounds):
@@ -99,6 +103,7 @@ class StatisticalGeneratorV3:
             self.profiles[n] = p
 
     def _build_pattern(self):
+        """합·AC·홀짝·구간·끝수 등 당첨 조합 패턴 분포 학습"""
         sums, acs = [], []
         odd_c, sec_c, digit_c = Counter(), Counter(), Counter()
         for _, nums in self._rounds:
@@ -141,9 +146,12 @@ class StatisticalGeneratorV3:
             self.top_partners[n] = partners[:5]
 
     @staticmethod
-    def _calc_ac(nums): return len(set(abs(a-b) for a, b in combinations(nums, 2))) - (PICK - 1)
+    def _calc_ac(nums):
+        """조합의 AC값(서로 다른 차이 개수) 계산"""
+        return calc_ac(nums)
 
     def _build_weights(self, strategy):
+        """전략별 번호 추첨 가중치 벡터 구성"""
         w = {n: 1.0 for n in range(1, TOTAL + 1)}
         if strategy == "hot":
             mx = max(p.weighted_freq for p in self.profiles.values()) or 1
@@ -175,23 +183,15 @@ class StatisticalGeneratorV3:
         return w
 
     def _validate(self, nums, strict=True):
+        """합·AC(학습범위) 검증 후 공통 구조 검증"""
         s = sum(nums); lo, hi = self.pattern_sum_range
         if not (lo <= s <= hi): return False
         ac = self._calc_ac(nums); al, ah = self.pattern_ac_range
         if strict and not (al <= ac <= ah): return False
-        odds = sum(1 for n in nums if n % 2 == 1)
-        if odds <= 1 or odds >= 5: return False
-        if sum(1 for n in nums if n >= 23) in (0, 6): return False
-        sn = sorted(nums); c = 1
-        for i in range(1, len(sn)):
-            c = c + 1 if sn[i] == sn[i-1] + 1 else 1
-            if c >= 4: return False
-        for s2, e in SECTIONS:
-            if sum(1 for n in nums if s2 <= n <= e) >= 4: return False
-        if max(Counter(n % 10 for n in nums).values()) >= 3: return False
-        return True
+        return base_validate(nums)
 
     def _pattern_score(self, nums):
+        """조합이 학습된 패턴 분포에 부합하는 정도 점수화"""
         sc, ck = 0.0, 0
         sc += max(0, 1.0 - abs(sum(nums) - self.pattern_avg_sum) / 50); ck += 1
         sc += max(0, 1.0 - abs(self._calc_ac(nums) - self.pattern_avg_ac) / 5); ck += 1
@@ -205,12 +205,13 @@ class StatisticalGeneratorV3:
         sc += self.pattern_digit_dist.get(digit_max, 0) * 2; ck += 1
         # 연번 보너스 (1~2쌍이면 가산)
         sn = sorted(nums)
-        consec = sum(1 for i in range(len(sn)-1) if sn[i+1] == sn[i]+1)
+        consec = count_consecutive_pairs(sn)
         if consec in (1, 2): sc += 0.5
         ck += 1
         return sc / ck
 
     async def generate(self, pool, strategy="balanced", count=5, exclude_numbers=None, include_numbers=None):
+        """전략 가중치·PMI 동반관계로 추천 조합 생성"""
         if not self._loaded: await self.load_data(pool)
         if not self._rounds: return [{"error": "데이터 없음"}]
 
@@ -243,7 +244,7 @@ class StatisticalGeneratorV3:
 
             odds = sum(1 for n in picked if n % 2 == 1)
             sn = sorted(picked)
-            consec_pairs = sum(1 for i in range(len(sn)-1) if sn[i+1] == sn[i]+1)
+            consec_pairs = count_consecutive_pairs(sn)
             results.append({
                 "numbers": picked, "sum": sum(picked), "ac_value": self._calc_ac(picked),
                 "odd_even": f"{odds}:{6-odds}", "pattern_score": round(ps * 100, 1),
@@ -255,6 +256,7 @@ class StatisticalGeneratorV3:
         return results
 
     async def get_full_analysis(self, pool):
+        """온도군·과열·스트릭·PMI 페어 등 통계 분석 종합 반환"""
         if not self._loaded: await self.load_data(pool)
         if not self.profiles: return {"error": "데이터 없음"}
 

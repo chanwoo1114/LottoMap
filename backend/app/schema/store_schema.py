@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 
 class StoreQuery(BaseModel):
+    """판매점 검색 요청"""
     sido: str | None = Field(None, description="시/도")
     sigungu: str | None = Field(None, description="시/군/구")
     address: str | None = Field(None, description="주소 키워드 (부분 일치)")
@@ -14,6 +15,7 @@ class StoreQuery(BaseModel):
 
 
 class NearbyStoreQuery(BaseModel):
+    """지도 영역 내 주변 판매점 조회 요청"""
     min_lat: float = Field(..., ge=-90, le=90, description="남서쪽 위도")
     min_lng: float = Field(..., ge=-180, le=180, description="남서쪽 경도")
     max_lat: float = Field(..., ge=-90, le=90, description="북동쪽 위도")
@@ -21,6 +23,7 @@ class NearbyStoreQuery(BaseModel):
     limit: int = Field(300, ge=1, le=1000, description="최대 건수")
 
 class StoreResponse(BaseModel):
+    """판매점 정보 응답"""
     id: int = Field(description="판매점 고유 ID")
     store_id: str = Field(description="동행복권 기준 판매점 고유번호")
     name: str = Field(description="판매점 상호명")

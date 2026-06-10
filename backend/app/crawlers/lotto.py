@@ -6,7 +6,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, delay, get_client,
+    BASE_URL, client_session, delay, get_client,
     insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 
@@ -19,8 +19,7 @@ _OPT_VAL_RE = re.compile(r'id="opt_val"[^>]*value="(\d+)"')
 
 async def fetch_latest_lotto_round() -> int:
     """동행복권 결과 페이지에서 최신 회차 번호 파싱"""
-    client = await get_client()
-    try:
+    async with client_session() as client:
         resp = await client.get(f"{BASE_URL}/lt645/result")
         resp.raise_for_status()
         m = _OPT_VAL_RE.search(resp.text)
@@ -29,8 +28,6 @@ async def fetch_latest_lotto_round() -> int:
         latest = int(m.group(1))
         logger.info(f"[LOTTO] 최신 회차 감지: {latest}")
         return latest
-    finally:
-        await client.aclose()
 
 
 async def crawl_lotto_round(
@@ -125,8 +122,7 @@ async def crawl_and_save_all_lotto_results(
 
     total = 0
     failures: list[str] = []
-    client = await get_client()
-    try:
+    async with client_session() as client:
         calls = list(range(start_round + 9, latest_round, 10))
         calls.append(latest_round)
 
@@ -144,8 +140,6 @@ async def crawl_and_save_all_lotto_results(
                     logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
                 logger.error(f"[FAIL] srchLtEpsd={n}: {e}")
             await delay()
-    finally:
-        await client.aclose()
 
     missing = await find_missing_lotto_rounds(latest_round, start_round)
     logger.info(
@@ -164,8 +158,7 @@ async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
     resolved: list[str] = []
     still_failed: list[str] = []
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         for sub_key in sub_keys:
             try:
                 n = int(sub_key)
@@ -185,8 +178,6 @@ async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
                 still_failed.append(sub_key)
                 logger.warning(f"[RETRY] lotto {sub_key} 여전히 실패: {e}")
             await delay()
-    finally:
-        await client.aclose()
 
     logger.info(
         f"[RETRY] lotto: resolved={len(resolved)}, still_failed={len(still_failed)}"
@@ -202,11 +193,8 @@ async def crawl_latest_lotto_round() -> dict:
     target = last_round + 1
     logger.info(f"[START] crawl_lotto_latest: last={last_round}, target={target}")
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         results = await crawl_lotto_round(target, client=client)
-    finally:
-        await client.aclose()
 
     saved = await save_lotto_results_to_db(results) if results else 0
     logger.info(f"[END] crawl_lotto_latest: saved={saved}")

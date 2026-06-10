@@ -5,7 +5,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, get_client,
+    BASE_URL, client_session, get_client,
     insert_bootstrap_failure, resolve_bootstrap_failure,
 )
 
@@ -86,11 +86,8 @@ async def crawl_and_save_all_pension_results() -> dict:
     logger.info("[START] crawl_pension_all")
 
     try:
-        client = await get_client()
-        try:
+        async with client_session() as client:
             results = await fetch_all_pension_results(client=client)
-        finally:
-            await client.aclose()
 
         saved = await save_pension_results_to_db(results)
         logger.info(f"[END] crawl_pension_all: fetched={len(results)}, saved={saved}")
@@ -147,11 +144,8 @@ async def crawl_latest_pension_round() -> dict:
     )
     last_round = row["max_round"] or 0
 
-    client = await get_client()
-    try:
+    async with client_session() as client:
         results = await fetch_all_pension_results(client=client)
-    finally:
-        await client.aclose()
 
     new_results = [r for r in results if r["round_no"] > last_round]
     if not new_results:

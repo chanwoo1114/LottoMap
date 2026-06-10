@@ -5,6 +5,7 @@ import { useStoresInBounds } from './hooks/useStoresInBounds';
 import { useKakaoMap } from './hooks/useKakaoMap';
 import { StoreList } from '@/features/store/components/StoreList';
 import { LoginButton } from "@/features/auth/components/LoginButton.tsx";
+import { Brand } from '@/components/ui/Brand'
 
 export function MapScreen() {
   const followRef = useRef(true)
@@ -52,11 +53,11 @@ export function MapScreen() {
   
   return (
     <div className="flex h-full flex-col md:flex-row">
-      {/* ══════════════════════ 사이드바 (데스크톱═) / 헤더 (모바일) ═══════════════════════ */}
       <aside className="flex w-128 shrink-0 flex-col border-r border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <span className="font-bold text-text">복권 지도</span>
-          <LoginButton />
+          <Brand />
+          <LoginButton
+          />
         </div>
 
         <StoreList

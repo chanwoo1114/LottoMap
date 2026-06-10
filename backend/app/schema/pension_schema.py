@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class PensionResultsQuery(BaseModel):
+    """연금복권 회차별 추첨 결과 조회 요청"""
     from_round: int | None = Field(None, ge=1, description="시작 회차 (포함)")
     to_round: int | None = Field(None, ge=1, description="끝 회차 (포함)")
     page: int = Field(1, ge=1, description="페이지 번호 (1부터)")
@@ -11,6 +12,7 @@ class PensionResultsQuery(BaseModel):
 
 
 class PensionResultResponse(BaseModel):
+    """연금복권 회차별 추첨 결과 응답"""
     round_no: int = Field(description="추첨 회차")
     draw_date: date = Field(description="추첨일")
     first_prize_group: int = Field(description="1등 당첨번호의 조 (1~5)")

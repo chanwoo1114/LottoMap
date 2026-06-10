@@ -1,16 +1,14 @@
-import logging
 from typing import Annotated
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.api._helpers import or_404
 from app.core.database import get_pool
 from app.schema.pension_schema import (
     PensionResultResponse, PensionResultsQuery,
 )
 from app.services import pension_service
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pension", tags=["연금복권"])
 
@@ -37,10 +35,7 @@ async def get_latest_pension(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     """가장 최근 회차 한 건. 데이터 없으면 404."""
-    result = await pension_service.get_latest_pension_result(pool)
-    if not result:
-        raise HTTPException(404, "연금복권 결과가 없습니다.")
-    return result
+    return or_404(await pension_service.get_latest_pension_result(pool), "연금복권 결과가 없습니다.")
 
 
 @router.get(
@@ -53,7 +48,4 @@ async def get_pension_by_round(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     """회차 번호로 단일 결과. 없으면 404."""
-    result = await pension_service.get_pension_result_by_round(pool, round_no)
-    if not result:
-        raise HTTPException(404, "해당 회차 결과를 찾을 수 없습니다.")
-    return result
+    return or_404(await pension_service.get_pension_result_by_round(pool, round_no), "해당 회차 결과를 찾을 수 없습니다.")

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -29,13 +29,7 @@ class Settings(BaseSettings):
     EMAIL_CODE_RESEND_COOLDOWN_SECONDS: int = 180
     EMAIL_CODE_MAX_ATTEMPTS: int = 5
     EMAIL_CODE_MAX_EXHAUSTED_PER_DAY: int = 3
-    EMAIL_VERIFIED_TTL_MINUTES: int = 30
 
-    @property
-    def DATABASE_URL(self) -> str:
-        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-
-    class Config:
-        env_file = str(BASE_DIR / ".env")
+    model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"))
 
 settings = Settings()

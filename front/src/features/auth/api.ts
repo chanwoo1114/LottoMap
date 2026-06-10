@@ -11,6 +11,20 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface UserResponse {
+  id: number;
+  email: string | null;
+  nickname: string;
+  profile_image: string | null;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  user: UserResponse;
+}
+
 export interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -56,3 +70,7 @@ export const socialLogin = (provider: SocialProvider, accessToken: string) =>
   api
     .post<TokenResponse>(`/auth/social/${provider}`, { access_token: accessToken })
     .then((r) => r.data);
+
+// 내 정보 조회
+export const getMe = () =>
+  api.get<UserResponse>('/auth/me').then((r) => r.data);

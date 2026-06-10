@@ -9,12 +9,22 @@ from app.core.security import (
     create_access_token, hash_password, verify_password,
     generate_refresh_token, hash_token
 )
-from app.schema.user_schema import LoginRequest, SignupRequest, TokenResponse
+from app.schema.user_schema import LoginRequest, SignupRequest, TokenResponse, UserResponse, AuthResponse
 from app.services.email_service import send_verification_code
 from app.services.social_providers import fetch_social_profile
 
+async def _issue_auth(executor, user_id: int) -> AuthResponse:
+    """토큰 발급 + 유저 정보를 함께 담아 반환 (로그인/회원가입/소셜 공용)"""
+    tokens = await _issue_tokens(executor, user_id)
+    row = await executor.fetchrow(
+        """SELECT id, email, nickname, profile_image
+           FROM users WHERE id = $1""",
+        user_id,
+    )
+    return AuthResponse(**tokens.model_dump(), user=UserResponse(**dict(row)))
 
 async def _issue_tokens(executor, user_id: int) -> TokenResponse:
+    """access 토큰 발급 + refresh 토큰 생성·저장 후 토큰 쌍 반환."""
     access = create_access_token(user_id)
     refresh = generate_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(
@@ -29,21 +39,27 @@ async def _issue_tokens(executor, user_id: int) -> TokenResponse:
 
     return TokenResponse(access_token=access, refresh_token=refresh)
 
-async def _ensure_email_verified(pool: asyncpg.Pool, email: str) -> None:
-    """최근 10분 내 이메일 인증이 완료됐는지 확인"""
-    verified = await pool.fetchval(
-        """SELECT 1 FROM email_verifications
+async def _consume_email_verification(conn, email: str) -> None:
+    """최근 10분 내 인증된 행을 1건 찾아 '소비'(verified_at=NULL)해 재사용을 막는다.
+    인증 내역이 없으면 400. 반드시 호출자 트랜잭션 안에서 사용."""
+    row = await conn.fetchrow(
+        """SELECT id FROM email_verifications
                  WHERE email = $1
                      AND verified_at IS NOT NULL
                      AND verified_at > NOW() - INTERVAL '10 minutes'
-                 ORDER BY verified_at DESC LIMIT 1""",
+                 ORDER BY verified_at DESC LIMIT 1
+                 FOR UPDATE""",
         email,
     )
-    if not verified:
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이메일 인증을 먼저 완료해주세요.",
         )
+    await conn.execute(
+        "UPDATE email_verifications SET verified_at = NULL WHERE id = $1",
+        row["id"],
+    )
 
 async def _ensure_email_available(pool: asyncpg.Pool, email: str) -> None:
     """이메일이 가입에 사용 가능한지 확인"""
@@ -69,18 +85,21 @@ async def check_nickname_available(pool: asyncpg.Pool, nickname: str) -> bool:
     return not exists
 
 
-async def signup(pool: asyncpg.Pool, req: SignupRequest) -> TokenResponse:
+async def signup(pool: asyncpg.Pool, req: SignupRequest) -> AuthResponse:
     """회원가입"""
-    await _ensure_email_verified(pool, req.email)
     await _ensure_email_available(pool, req.email)
     await _ensure_nickname_available(pool, req.nickname)
 
-    user_id = await pool.fetchval(
-        """INSERT INTO users (email, password, nickname) VALUES ($1, $2, $3) RETURNING id""",
-        req.email, hash_password(req.password), req.nickname
-    )
-
-    return await _issue_tokens(pool, user_id)
+    # 인증 소비 → 유저 생성 → 토큰 발급을 한 트랜잭션으로
+    # (인증 소비를 가용성 검증 뒤로 두어, 닉네임 충돌 등으로 실패해도 인증이 낭비되지 않게)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await _consume_email_verification(conn, req.email)
+            user_id = await conn.fetchval(
+                """INSERT INTO users (email, password, nickname) VALUES ($1, $2, $3) RETURNING id""",
+                req.email, hash_password(req.password), req.nickname,
+            )
+            return await _issue_auth(conn, user_id)
 
 async def send_email_code(pool: asyncpg.Pool, email: str) -> None:
     """이메일 확인 코드 전송 (회원가입용: 아직 가입 안 된 이메일이어야 함)"""
@@ -142,7 +161,7 @@ async def verify_email_code(pool: asyncpg.Pool, email: str, code: str) -> None:
             )
 
 
-async def login(pool: asyncpg.Pool, req: LoginRequest) -> TokenResponse:
+async def login(pool: asyncpg.Pool, req: LoginRequest) -> AuthResponse:
     """로그인"""
     user = await pool.fetchrow(
         "SELECT id, password, is_active FROM users WHERE email = $1",
@@ -174,7 +193,53 @@ async def login(pool: asyncpg.Pool, req: LoginRequest) -> TokenResponse:
             detail="비활성화된 계정입니다.",
         )
 
-    return await _issue_tokens(pool, user["id"])
+    return await _issue_auth(pool, user["id"])
+
+
+async def refresh(pool: asyncpg.Pool, refresh_token: str) -> TokenResponse:
+    """리프레시 토큰으로 새 토큰 쌍 발급 (회전).
+
+    기존 토큰은 무효화(revoked_at)하고 새 access/refresh 쌍을 내려준다.
+    유효하지 않거나 만료/무효화된 토큰이면 401.
+    """
+    token_hash = hash_token(refresh_token)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """SELECT id, user_id, expires_at, revoked_at
+                   FROM refresh_tokens
+                   WHERE token_hash = $1
+                   FOR UPDATE""",
+                token_hash,
+            )
+
+            if row is None or row["revoked_at"] is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="유효하지 않은 토큰입니다. 다시 로그인해주세요.",
+                )
+
+            if row["expires_at"] < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="세션이 만료되었습니다. 다시 로그인해주세요.",
+                )
+
+            is_active = await conn.fetchval(
+                "SELECT is_active FROM users WHERE id = $1", row["user_id"]
+            )
+            if not is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="비활성화된 계정입니다.",
+                )
+
+            await conn.execute(
+                "UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1",
+                row["id"],
+            )
+            return await _issue_tokens(conn, row["user_id"])
 
 
 async def _ensure_email_exists(pool: asyncpg.Pool, email: str) -> None:
@@ -232,28 +297,31 @@ async def _create_and_send_code(pool: asyncpg.Pool, email: str) -> None:
 
 
 async def send_password_reset_code(pool: asyncpg.Pool, email: str) -> None:
+    """비밀번호 재설정 코드 전송 (가입된 이메일이어야 함)."""
     await _ensure_email_exists(pool, email)
     await _create_and_send_code(pool, email)
 
 
 async def reset_password(pool: asyncpg.Pool, email:str, new_password:str) -> None:
     """비밀번호 재설정"""
-    await _ensure_email_verified(pool, email)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await _consume_email_verification(conn, email)
 
-    user_id = await pool.fetchval("SELECT id FROM users WHERE email = $1", email)
+            user_id = await conn.fetchval("SELECT id FROM users WHERE email = $1", email)
+            if not user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="가입되지 않은 이메일입니다.",
+                )
 
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="가입되지 않은 이메일입니다.",
-        )
-
-    await pool.execute(
-        "UPDATE users SET password = $1 WHERE id = $2",
-        hash_password(new_password), user_id,
-    )
-
-    await pool.execute("DELETE FROM refresh_tokens WHERE user_id = $1", user_id)
+            await conn.execute(
+                "UPDATE users SET password = $1 WHERE id = $2",
+                hash_password(new_password), user_id,
+            )
+            await conn.execute(
+                "DELETE FROM refresh_tokens WHERE user_id = $1", user_id,
+            )
 
 _PROVIDER_NAMES = {"kakao": "카카오", "naver": "네이버", "google": "구글"}
 
@@ -269,7 +337,7 @@ async def _social_provider_name(executor, user_id: int) -> str:
 
 async def social_login(
         pool: asyncpg.Pool, provider: str, access_token: str
-) -> TokenResponse:
+) -> AuthResponse:
     """소셜 로그인
 
     1. (provider, uid)로 기존 연동 조회 → 있으면 그 유저로 로그인
@@ -329,5 +397,18 @@ async def social_login(
                     detail="비활성화된 계정입니다.",
                 )
 
-            return await _issue_tokens(conn, user_id)
+            return await _issue_auth(conn, user_id)
 
+async def get_me(pool: asyncpg.Pool, user_id: int) -> UserResponse:
+    """현재 로그인한 사용자 정보"""
+    row = await pool.fetchrow(
+        """SELECT id, email, nickname, profile_image
+           FROM users WHERE id = $1 AND is_active = TRUE""",
+        user_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="사용자를 찾을 수 없습니다.",
+        )
+    return UserResponse(**dict(row))

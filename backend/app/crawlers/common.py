@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -24,6 +25,16 @@ async def get_client() -> httpx.AsyncClient:
     except httpx.HTTPError as e:
         logger.warning(f"[get_client] 초기 세션 GET 실패, 무시하고 진행: {e}")
     return client
+
+
+@asynccontextmanager
+async def client_session():
+    """세션 쿠키 받은 httpx 클라이언트를 열고 끝나면 자동으로 닫는다."""
+    client = await get_client()
+    try:
+        yield client
+    finally:
+        await client.aclose()
 
 
 async def delay(lo: int = 5, hi: int = 10) -> None:
