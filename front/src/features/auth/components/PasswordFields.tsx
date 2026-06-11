@@ -1,19 +1,21 @@
 import { TextField } from '@/components/ui/TextField';
 import { isValidPassword } from '../validation';
 
-export function PasswordFields({
-  password1, setPassword1,
-  password2, setPassword2,
-  placeholder1 = "비밀번호 입력",
-  placeholder2 = "비밀번호 확인",
-}: {
+interface PasswordFieldsProps {
   password1: string;
   setPassword1: (v: string) => void;
   password2: string;
   setPassword2: (v: string) => void;
   placeholder1?: string;
   placeholder2?: string;
-}) {
+}
+
+export function PasswordFields({
+  password1, setPassword1,
+  password2, setPassword2,
+  placeholder1 = "비밀번호 입력",
+  placeholder2 = "비밀번호 확인",
+}: PasswordFieldsProps) {
   const passwordInvalid = password1 !== "" && !isValidPassword(password1);
   const passwordMismatch = password2 !== "" && password1 !== password2;
 

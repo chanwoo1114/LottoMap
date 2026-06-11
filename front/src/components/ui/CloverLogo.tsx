@@ -1,4 +1,8 @@
-export function CloverLogo({ size = 26 }: { size?: number }) {
+interface CloverLogoProps {
+  size?: number;
+}
+
+export function CloverLogo({ size = 26 }: CloverLogoProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
       <g fill="#16a34a">

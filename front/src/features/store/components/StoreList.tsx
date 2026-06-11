@@ -1,37 +1,37 @@
 import type { Store } from '@/features/store/api'
+import { StoreListItem } from "@/features/store/components/StoreListItem.tsx";
 
 interface StoreListProps {
   stores: Store[]
+  selectedId?: number | null
+  onSelect?: (store: Store) => void
+  onRequireLogin: () => void
 }
 
-export function StoreList({ stores }: StoreListProps) {
+export function StoreList({
+  stores, onSelect, selectedId, onRequireLogin
+}: StoreListProps) {
+
   return (
-    <div className="overflow-y-auto">
-      <div>
-        <h2 className="text-sm text-gray-700 font-semibold">
-          내 주변 <span className="text-gray-400">{stores.length}</span> 개 판매점
-        </h2>
-      </div>
+    <div>
+      <h2 className="px-4 py-3 text-sm font-semibold text-gray-700">
+        내 주변 <span className="font-bold text-accent">{stores.length}</span> 개 판매점
+      </h2>
       {stores.length === 0 ? (
-        <p className="px-4 py-8 text-center text-sm text-gray-400">
-          지도를 움직여 판매점을 찾아보세요
-        </p>
+        <p className="px-4 py-8 text-center text-sm text-gray-400">지도를 움직여 판매점을 찾아보세요</p>
       ) : (
-          <ul>
-            {stores.map((store) => (
-              <li key={store.id}>
-                <button
-                  type="button"
-                  className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50
-                  focous:bg-gray-50 focus:outline-none active:bg-gray-100
-                  "
-                >
-                  <p className="font-medium text-gray-900">{store.name}</p>
-                  <p className="mt-0.5 text-sm text-gray-500">{store.address}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
+        <ul>
+          {stores.map((s) => (
+            <li key={s.id}>
+              <StoreListItem
+                store={s}
+                selected={selectedId === s.id}
+                onSelect={onSelect}
+                onRequireLogin={onRequireLogin}
+              />
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )

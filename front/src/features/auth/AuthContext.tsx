@@ -12,7 +12,11 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export function AuthProvider({ children }: AuthProviderProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!tokenStore.getAccess());
   const [user, setUser] = useState<UserResponse | null>(null);
 

@@ -7,7 +7,11 @@ import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordFields } from "./PasswordFields";
 import { isValidPassword } from '../validation';
 
-export function PasswordResetForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
+interface PasswordResetFormProps {
+  onSwitchToLogin: () => void;
+}
+
+export function PasswordResetForm({ onSwitchToLogin }: PasswordResetFormProps) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password1, setPassword1] = useState("");

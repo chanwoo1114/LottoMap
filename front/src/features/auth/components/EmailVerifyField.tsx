@@ -3,19 +3,21 @@ import { TextField } from '@/components/ui/TextField';
 import { isValidEmail } from '../validation';
 import type { useEmailVerification } from '../hooks/useEmailVerification';
 
-export function EmailVerifyField({
-email, setEmail,
-code, setCode,
-verification,
-placeholder = "이메일",
-  }: {
+interface EmailVerifyFieldProps {
   email: string;
   setEmail: (v: string) => void;
   code: string;
   setCode: (v: string) => void;
   verification: ReturnType<typeof useEmailVerification>;
   placeholder?: string;
-}) {
+}
+
+export function EmailVerifyField({
+  email, setEmail,
+  code, setCode,
+  verification,
+  placeholder = "이메일",
+}: EmailVerifyFieldProps) {
   const emailInvalid = email !== "" && !isValidEmail(email);
   const showCodeInput =
     !verification.verified &&

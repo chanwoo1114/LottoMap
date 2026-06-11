@@ -11,13 +11,15 @@ import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordFields } from "./PasswordFields";
 import { isValidPassword } from '../validation';
 
+interface SignupFormProps {
+  onClose: () => void;
+  onSwitchToLogin: () => void;
+}
+
 export function SignupForm({
   onClose,
   onSwitchToLogin,
-}: {
-  onClose: () => void;
-  onSwitchToLogin: () => void;
-}) {
+}: SignupFormProps) {
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");

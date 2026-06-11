@@ -13,6 +13,6 @@ const PRODUCTS: { key: keyof Store; label: string }[] = [
   { key: 'sells_speetto_500', label: '스피또500' },
 ];
 
-export function StoreDetail({ store, onClose }: { StoreDetailProps }) {
+export function StoreDetail({ store, onClose }: StoreDetailProps) {
 
 }

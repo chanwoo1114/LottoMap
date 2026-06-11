@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useGeolocation } from './hooks/useGeolocation';
 import { BiCurrentLocation } from "react-icons/bi";
 import { useStoresInBounds } from './hooks/useStoresInBounds';
@@ -13,6 +13,7 @@ export function MapScreen() {
   const myMarkerRef = useRef<kakao.maps.CustomOverlay | null>(null);
   const { containerRef, map } = useKakaoMap();
   const { stores, selectedStore, setSelectedStore } = useStoresInBounds(map);
+  const [authOpen, setAuthOpen] = useState(false)
 
   // 현재 위치로 이동
   useEffect(() => {
@@ -50,7 +51,9 @@ export function MapScreen() {
     map.panTo(new kakao.maps.LatLng(location.lat, location.lng));
 
   }
-  
+
+  const requireLogin = () => setAuthOpen(true)
+
   return (
     <div className="flex h-full flex-col md:flex-row">
       <aside className="flex w-128 shrink-0 flex-col border-r border-gray-200 bg-white">
@@ -62,6 +65,9 @@ export function MapScreen() {
 
         <StoreList
           stores={stores}
+          selectedId={selectedStore?.id}
+          onSelect={setSelectedStore}
+          onRequireLogin={requireLogin}
         />
       </aside>
       <div className="relative flex-1 overflow-hidden">

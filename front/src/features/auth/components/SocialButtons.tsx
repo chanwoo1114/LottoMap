@@ -3,7 +3,11 @@ import { RiKakaoTalkFill } from 'react-icons/ri';
 import { SiNaver } from 'react-icons/si';
 import { useSocialLogin } from '../hooks/useSocialLogin';
 
-export function SocialButtons({ onClose }: { onClose: () => void }) {
+interface SocialButtonsProps {
+  onClose: () => void;
+}
+
+export function SocialButtons({ onClose }: SocialButtonsProps) {
   const { login, loading, error } = useSocialLogin(onClose);
   const busy = loading !== null;
 

@@ -68,7 +68,12 @@ export function UserMenu() {
   )
 }
 
-function MenuItem({ children, onClick }: {children: ReactNode; onClick: () => void }) {
+interface MenuItemProps {
+  children: ReactNode;
+  onClick: () => void;
+}
+
+function MenuItem({ children, onClick }: MenuItemProps) {
   return (
     <button
       type="button"

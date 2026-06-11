@@ -25,3 +25,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+.lm-marker {
+  cursor: pointer;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .3));
+  transition: transform .15s ease;
+  transform-origin: bottom center;
+}
+.lm-marker:hover { transform: scale(1.12); }
+.lm-marker--sel  { transform: scale(1.25); }

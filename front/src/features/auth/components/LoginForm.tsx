@@ -7,15 +7,17 @@ import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/TextField'
 import { isValidEmail } from '../validation'
 
+interface LoginFormProps {
+  onClose: () => void;
+  onSwitchToSignup: () => void;
+  onSwitchToReset: () => void;
+}
+
 export function LoginForm({
   onClose,
   onSwitchToSignup,
   onSwitchToReset,
-} : {
-  onClose: () => void;
-  onSwitchToSignup: () => void;
-  onSwitchToReset: () => void;
-}) {
+}: LoginFormProps) {
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
