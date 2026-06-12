@@ -3,7 +3,6 @@ import { getStoresInBounds, type Store } from '@/features/store/api'
 
 const MIN_LEVEL_TO_FETCH = 6
 
-// 깔끔한 teardrop 핀. favorite=금색별 / selected=확대+링
 function buildPin(favorite: boolean, selected: boolean): HTMLDivElement {
   const green = '#16a34a', gold = '#f59e0b'
   const color = favorite ? gold : green
