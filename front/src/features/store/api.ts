@@ -47,3 +47,12 @@ export const searchStores = (params: StoreSearchParams) =>
 
 export const getStoreById = (id: number) =>
   api.get<Store>(`/store/${id}`).then(r => r.data)
+
+export const getFavorites = () =>
+  api.get<Store[]>('/favorites').then((r) => r.data);
+
+export const addFavorite = (storeId: number) =>
+  api.post(`/favorites/${storeId}`).then(() => undefined)
+
+export const removeFavorite = (storeId: number) =>
+  api.delete(`/favorites/${storeId}`).then(() => undefined);
