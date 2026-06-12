@@ -6,7 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    stores, generator, predictions, lotto, pension, auth
+    stores, generator, predictions, lotto,
+    pension, auth, favorites
 )
 from app.core.database import get_pool, close_pool
 
@@ -61,3 +62,4 @@ app.include_router(predictions.router)
 app.include_router(lotto.router)
 app.include_router(pension.router)
 app.include_router(auth.router)
+app.include_router(favorites.router)

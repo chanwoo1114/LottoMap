@@ -22,6 +22,7 @@ class NearbyStoreQuery(BaseModel):
     max_lng: float = Field(..., ge=-180, le=180, description="북동쪽 경도")
     limit: int = Field(300, ge=1, le=1000, description="최대 건수")
 
+
 class StoreResponse(BaseModel):
     """판매점 정보 응답"""
     id: int = Field(description="판매점 고유 ID")
