@@ -6,7 +6,6 @@ import { useKakaoMap } from './hooks/useKakaoMap';
 import { StoreList } from '@/features/store/components/StoreList';
 import { LoginButton } from "@/features/auth/components/LoginButton.tsx";
 import { Brand } from '@/components/ui/Brand'
-import {IconButton} from "@/components/ui/ButtonSheet.tsx";
 
 export function MapScreen() {
   const followRef = useRef(true)
@@ -56,7 +55,7 @@ export function MapScreen() {
   const requireLogin = () => setAuthOpen(true)
 
   return (
-    <div className="relative flex h-full overflow-hidden">
+    <div className="flex h-full flex-col md:flex-row">
       <aside className="flex w-128 shrink-0 flex-col border-r border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <Brand />
@@ -71,18 +70,16 @@ export function MapScreen() {
           onRequireLogin={requireLogin}
         />
       </aside>
-
-      {/*지도*/}
       <div className="relative flex-1 overflow-hidden">
         <div ref={containerRef} className="h-full w-full" />
 
-        <IconButton
+        <button
           onClick={goToMyLocation}
+          className="absolute bottom-6 right-4 z-10 rounded-full bg-white p-3 shadow-md cursor-pointer hover:bg-gray-100 active:scale-95 transition"
           aria-label="내 위치로 이동"
-          className="absolute right-4 bottom-[15rem] z-20 md:bottom-6"
         >
           <BiCurrentLocation className="h-5 w-5"/>
-        </IconButton>
+        </button>
       </div>
     </div>
   );
