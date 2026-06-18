@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '../AuthContext';
 import { cn } from '@/components/ui/cn';
 
-export function UserMenu() {
+export function UserMenu(
+  { onOpenFavorites }: {onOpenFavorites?: () => void}
+) {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -53,8 +55,7 @@ export function UserMenu() {
             <p className="truncate text-sm font-semibold text-gray-900">{nickname}님</p>
             {user?.email && <p className="truncate text-xs text-gray-400">{user.email}</p>}
           </div>
-          <MenuItem onClick={() => setOpen(false)}>⭐ 즐겨찾는 판매점</MenuItem>
-          <button
+          <MenuItem onClick={() => { setOpen(false); onOpenFavorites?.() }}>⭐ 즐겨찾는 판매점</MenuItem>          <button
             type="button"
             onClick={() => {setOpen(false); logout()}}
             className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"

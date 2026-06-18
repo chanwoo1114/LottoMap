@@ -4,11 +4,12 @@ import { AuthModal } from './AuthModal';
 import { UserMenu } from './UserMenu';
 
 export function LoginButton(
+  { onOpenFavorites }: {onOpenFavorites?: () => void}
 ) {
   const { isAuthenticated } = useAuth();
   const [open, setOpen] = useState(false);
 
-  if (isAuthenticated) return <UserMenu />;
+  if (isAuthenticated) return <UserMenu onOpenFavorites={onOpenFavorites}/>;
 
   return (
     <>
