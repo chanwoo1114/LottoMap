@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { getStoresInBounds, type Store } from '@/features/store/api'
+import { getStoresInBounds, getFavorites, type Store } from '@/features/store/api'
 
 const MIN_LEVEL_TO_FETCH = 6
 
@@ -22,16 +22,17 @@ function buildPin(favorite: boolean, selected: boolean): HTMLDivElement {
 export function useStoresInBounds(
   map: kakao.maps.Map | null,
   isFavorite: (storeId: number) => boolean,
+  favOpen: boolean,
 ) {
   const [stores, setStores] = useState<Store[]>([])
+  const [favStores, setFavStores] = useState<Store[]>([])
   const [selectedStore, setSelectedStore] = useState<Store | null>(null)
   const [tooFar, setTooFar] = useState(false)
   const overlaysRef = useRef<kakao.maps.CustomOverlay[]>([])
 
-  // 화면 이동 시 범위 내 판매점 조회
   useEffect(() => {
-    if (!map) return
-    const handleIdle = async () => {
+    if (!map || favOpen) return
+    const fetchBbox = async () => {
       if (map.getLevel() > MIN_LEVEL_TO_FETCH) {
         setTooFar(true)
         setStores([])
@@ -46,20 +47,41 @@ export function useStoresInBounds(
         }))
       } catch (e) { console.error(e) }
     }
-    kakao.maps.event.addListener(map, 'idle', handleIdle)
-    return () => kakao.maps.event.removeListener(map, 'idle', handleIdle)
-  }, [map])
+    fetchBbox()                                  // 진입 / 즐겨찾기 닫힘 시 즉시 1회
+    kakao.maps.event.addListener(map, 'idle', fetchBbox)
+    return () => kakao.maps.event.removeListener(map, 'idle', fetchBbox)
+  }, [map, favOpen])
 
-  // 마커 렌더 + 클릭 시 상세 열기
+  useEffect(() => {
+    if (!map || !favOpen) return
+    let cancelled = false
+    setTooFar(false)
+    getFavorites()
+      .then((favs) => {
+        if (cancelled) return
+        setFavStores(favs)
+        const pts = favs.filter((s) => s.lat != null && s.lng != null)
+        if (pts.length) {
+          const bounds = new kakao.maps.LatLngBounds()
+          pts.forEach((s) => bounds.extend(new kakao.maps.LatLng(s.lat!, s.lng!)))
+          map.setBounds(bounds)
+        }
+      })
+      .catch(() => { if (!cancelled) setFavStores([]) })
+    return () => { cancelled = true }
+  }, [map, favOpen])
+
   useEffect(() => {
     if (!map) return
     overlaysRef.current.forEach((o) => o.setMap(null))
     overlaysRef.current = []
 
-    stores.forEach((store) => {
+    const source = favOpen ? favStores : stores
+    source.forEach((store) => {
       if (store.lat == null || store.lng == null) return
       const selected = selectedStore?.id === store.id
-      const el = buildPin(isFavorite(store.id), selected)
+      const fav = favOpen ? true : isFavorite(store.id)   // 즐겨찾기 모드면 전부 금색
+      const el = buildPin(fav, selected)
       el.addEventListener('click', () => setSelectedStore(store))
       const ov = new kakao.maps.CustomOverlay({
         position: new kakao.maps.LatLng(store.lat, store.lng),
@@ -68,7 +90,7 @@ export function useStoresInBounds(
       ov.setMap(map)
       overlaysRef.current.push(ov)
     })
-  }, [map, stores, selectedStore, isFavorite])
+  }, [map, favOpen, stores, favStores, selectedStore, isFavorite])
 
   return { stores, selectedStore, setSelectedStore, tooFar }
 }

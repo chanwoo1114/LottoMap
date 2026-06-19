@@ -5,10 +5,15 @@ import { StoreListItem } from './StoreListItem'
 
 interface FavoritesPanelProps {
   onClose: () => void;
+  onSelect: (store: Store) => void;
   onRequireLogin: () => void;
 }
 
-export function FavoritesPanel({ onClose, onRequireLogin }: FavoritesPanelProps) {
+export function FavoritesPanel({
+  onClose,
+  onSelect,
+  onRequireLogin
+}: FavoritesPanelProps) {
   const { isFavorite } = useFavorites()
   const [stores, setStores] = useState<Store[]>([])
   const [loading, setLoading] = useState(false)
@@ -44,7 +49,11 @@ export function FavoritesPanel({ onClose, onRequireLogin }: FavoritesPanelProps)
             <ul>
               {visible.map((s) => (
                 <li key={s.id}>
-                  <StoreListItem store={s} onRequireLogin={onRequireLogin} />
+                  <StoreListItem
+                    store={s}
+                    onSelect={onSelect}
+                    onRequireLogin={onRequireLogin}
+                  />
                 </li>
               ))}
             </ul>

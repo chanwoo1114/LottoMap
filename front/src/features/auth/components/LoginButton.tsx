@@ -3,24 +3,21 @@ import { useAuth } from '../AuthContext';
 import { AuthModal } from './AuthModal';
 import { UserMenu } from './UserMenu';
 
-export function LoginButton(
-  { onOpenFavorites }: {onOpenFavorites?: () => void}
-) {
+export function LoginButton() {
   const { isAuthenticated } = useAuth();
   const [open, setOpen] = useState(false);
 
-  if (isAuthenticated) return <UserMenu onOpenFavorites={onOpenFavorites}/>;
+  if (isAuthenticated) return <UserMenu />;
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-lg border border-transparent bg-[#2E5BD6] px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-[#264FB8]"
+        className="rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
       >
         로그인
       </button>
-
       <AuthModal open={open} onClose={() => setOpen(false)} />
     </>
   );

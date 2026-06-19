@@ -15,9 +15,9 @@ export function MapScreen() {
   const myMarkerRef = useRef<kakao.maps.CustomOverlay | null>(null)
   const { containerRef, map } = useKakaoMap()
   const { isFavorite } = useFavorites()
-  const { stores, selectedStore, setSelectedStore, tooFar } = useStoresInBounds(map, isFavorite)
-  const [authOpen, setAuthOpen] = useState(false)
   const [favOpen, setFavOpen] = useState(false)
+  const { stores, selectedStore, setSelectedStore, tooFar } = useStoresInBounds(map, isFavorite, favOpen)
+  const [authOpen, setAuthOpen] = useState(false)
 
   useEffect(() => {
     if (!map) return
@@ -42,13 +42,21 @@ export function MapScreen() {
   const goToMyLocation = () => {
     if (!map) return
     followRef.current = true
+    map.setLevel(4)
     map.panTo(new kakao.maps.LatLng(location.lat, location.lng))
   }
 
-  const showOnMap = (store: Store) => {
+  const panToStore = (store: Store) => {
     if (!map || store.lat == null || store.lng == null) return
     followRef.current = false
     map.panTo(new kakao.maps.LatLng(store.lat, store.lng))
+  }
+
+  const focusFavorite = (store: Store) => {
+    if (!map || store.lat == null || store.lng == null) return
+    map.setLevel(4)
+    panToStore(store)
+    setSelectedStore(store)
   }
 
   const requireLogin = () => setAuthOpen(true)
@@ -63,6 +71,7 @@ export function MapScreen() {
         favOpen={favOpen}
         onOpenFavorites={() => setFavOpen(true)}
         onCloseFavorites={() => setFavOpen(false)}
+        onFavoriteSelect={focusFavorite}
       />
 
       {selectedStore && (
@@ -70,7 +79,7 @@ export function MapScreen() {
           <StoreDetail
             store={selectedStore}
             onClose={() => setSelectedStore(null)}
-            onShowOnMap={showOnMap}
+            onShowOnMap={panToStore}
             onRequireLogin={requireLogin}
           />
         </aside>
