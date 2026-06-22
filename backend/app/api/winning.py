@@ -11,7 +11,7 @@ router = APIRouter(prefix="/winning-store", tags=['당첨 판매점'])
 
 @router.get(
     "",
-    response_model=[WinningStoreResponse],
+    response_model=list[WinningStoreResponse],
     summary="회차별 당첨 배풀점",
 )
 async def get_winning_store(
