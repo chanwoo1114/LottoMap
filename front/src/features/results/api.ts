@@ -15,18 +15,18 @@ export interface WinningStore {
 }
 
 export const getLatestLotto = () =>
-  api.get<LottoResult>('/lotto/results/latest').then((r) => r.data);
+  api.get<LottoResult>('/lotto/results/latest').then((r) => r.data)
 
 export const getLatestPension = () =>
-  api.get<PensionResult>('/pension/results/latest').then((r) => r.data);
+  api.get<PensionResult>('/pension/results/latest').then((r) => r.data)
 
 export const getLottoByRound = (round: number) =>
-  api.get<LottoResult>(`/lotto/results/${round}`).then((r) => r.data);
+  api.get<LottoResult>(`/lotto/results/${round}`).then((r) => r.data)
 
 export const getPensionByRound = (round: number) =>
-  api.get<PensionResult>(`/pension/results/${round}`).then((r) => r.data);
+  api.get<PensionResult>(`/pension/results/${round}`).then((r) => r.data)
 
 export const getWinningStores = (lotteryType: string, roundNo: number, prizeRank = 1) =>
   api.get<WinningStore[]>('/winning-store', {
     params: { lottery_type: lotteryType, round_no: roundNo, prize_rank: prizeRank },
-  }).then((r) => r.data);
+  }).then((r) => r.data)
