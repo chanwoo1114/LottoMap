@@ -5,6 +5,7 @@ import {
   type LottoResult, type PensionResult, type WinningStore,
 } from './api'
 import {RoundSelector} from "@/features/results/components/RoundSelector.tsx";
+import {LottoResultCard} from "@/features/results/components/LottoReultCard.tsx";
 
 type Kind = 'lotto' | 'pension' | 'speetto'
 
@@ -58,6 +59,9 @@ export function ResultsPage() {
             value={kind === 'lotto' ? round.lotto : round.pension}
             onChange={(r) => setRound((s) => ({...s, [kind]: r}))}
           />
+
+          {kind === 'lotto' && lotto && <LottoResultCard result={lotto} />}
+
         </>
       </div>
     </div>

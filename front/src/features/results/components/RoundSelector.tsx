@@ -20,13 +20,11 @@ export function RoundSelector({ latest, value, onChange }: RoundSelectorProps) {
   const top = Math.min(latest, value + 2)
   const nearby = Array.from({ length: WINDOW }, (_, i) => top - i).filter((r) => r >= 1)
 
-  // ★ 리셋은 '여는 순간'에 — effect에서 동기 setState 하지 않음
   const toggle = () => {
     if (!open) { setInput(''); setErr(false) }
     setOpen((v) => !v)
   }
 
-  // effect는 포커스 + 바깥클릭만 (setState 없음)
   useEffect(() => {
     if (!open) return
     const t = setTimeout(() => inputRef.current?.focus(), 0)
