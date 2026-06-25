@@ -4,8 +4,11 @@ import {
   getLatestLotto, getLatestPension, getLottoByRound, getPensionByRound,
   type LottoResult, type PensionResult, type WinningStore,
 } from './api'
-import {RoundSelector} from "@/features/results/components/RoundSelector.tsx";
-import {LottoResultCard} from "@/features/results/components/LottoReultCard.tsx";
+
+import { RoundSelector } from './components/RoundSelector'
+import { LottoResultCard } from './components/LottoResultCard.tsx'
+import { WinningStoreSection } from './components/WinningStoreSection'
+import { PensionResultCard } from './components/PensionResultCard'
 
 type Kind = 'lotto' | 'pension' | 'speetto'
 
@@ -35,6 +38,16 @@ export function ResultsPage() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    if (kind === 'lotto' && round.lotto) getLottoByRound(round.lotto).then(setLotto).catch(() => setLotto(null))
+    if (kind === 'pension' && round.pension) getPensionByRound(round.pension).then(setPension).catch(() => setPension(null))
+  }, [kind, round])
+
+  const showOnMap = (s: WinningStore) =>
+    navigate('/', { state: { focus: { lat: s.lat, lng: s.lng } } })
+
+  const curRound = kind === 'lotto' ? round.lotto : round.pension
+  const curLatest = kind === 'lotto' ? latest.lotto : latest.pension
 
   return (
     <div className="h-full overflow-y-auto">
@@ -61,7 +74,13 @@ export function ResultsPage() {
           />
 
           {kind === 'lotto' && lotto && <LottoResultCard result={lotto} />}
+          {kind === 'pension' && pension && <PensionResultCard result={pension} />}
 
+          <WinningStoreSection
+            lotteryType={kind}
+            roundNo={curRound}
+            onShowOnMap={showOnMap}
+          />
         </>
       </div>
     </div>
