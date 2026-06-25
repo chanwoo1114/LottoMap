@@ -14,9 +14,15 @@ interface MapSidebarProps {
 }
 
 export function MapSidebar({
-                             stores, selectedId, onSelect, onRequireLogin,
-                             favOpen, onOpenFavorites, onCloseFavorites, onFavoriteSelect,
-                           }: MapSidebarProps) {
+  stores,
+  selectedId,
+  onSelect,
+  onRequireLogin,
+  favOpen,
+  onOpenFavorites,
+  onCloseFavorites,
+  onFavoriteSelect
+}: MapSidebarProps) {
   return (
     <aside className="flex w-96 shrink-0 flex-col border-r border-gray-200 bg-white">
       {favOpen ? (

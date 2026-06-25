@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useStoresInBounds } from './hooks/useStoresInBounds'
 import { useKakaoMap } from './hooks/useKakaoMap'
@@ -19,6 +20,9 @@ export function MapScreen() {
   const { stores, selectedStore, setSelectedStore, tooFar } = useStoresInBounds(map, isFavorite, favOpen)
   const [authOpen, setAuthOpen] = useState(false)
 
+  const routerLocation = useLocation()
+  const focusedRef = useRef(false)
+
   useEffect(() => {
     if (!map) return
     const pos = new kakao.maps.LatLng(location.lat, location.lng)
@@ -38,6 +42,15 @@ export function MapScreen() {
     kakao.maps.event.addListener(map, 'dragstart', onDragStart)
     return () => kakao.maps.event.removeListener(map, 'dragstart', onDragStart)
   }, [map])
+
+  useEffect(() => {
+    const focus = (routerLocation.state as { focus?: { lat: number; lng: number } } | null)?.focus
+    if (!map || !focus || focusedRef.current) return
+    focusedRef.current = true
+    followRef.current = false
+    map.setLevel(4)
+    map.panTo(new kakao.maps.LatLng(focus.lat, focus.lng))
+  }, [map, routerLocation.state])
 
   const goToMyLocation = () => {
     if (!map) return
