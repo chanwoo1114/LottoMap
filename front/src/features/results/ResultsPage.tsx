@@ -9,6 +9,8 @@ import { RoundSelector } from './components/RoundSelector'
 import { LottoResultCard } from './components/LottoResultCard.tsx'
 import { WinningStoreSection } from './components/WinningStoreSection'
 import { PensionResultCard } from './components/PensionResultCard'
+import { LottoPrizeStructure } from './components/LottoPrizeStructure'
+import { PensionPrizeStructure } from './components/PensionPrizeStructure'
 
 type Kind = 'lotto' | 'pension' | 'speetto'
 
@@ -81,6 +83,10 @@ export function ResultsPage() {
             roundNo={curRound}
             onShowOnMap={showOnMap}
           />
+
+          {kind === 'lotto' && <LottoPrizeStructure />}
+          {kind === 'pension' && <PensionPrizeStructure />}
+
         </>
       </div>
     </div>
