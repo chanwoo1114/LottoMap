@@ -53,7 +53,7 @@ export function ResultsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-5">
+      <div className="mx-auto max-w-5xl space-y-4 p-5">
         <h1 className="text-xl font-bold text-gray-900">당첨결과</h1>
 
         <div className="flex gap-1 rounded-xl bg-gray-200/70 p-1">
@@ -70,9 +70,9 @@ export function ResultsPage() {
 
         <>
           <RoundSelector
-            latest={kind === 'lotto' ? latest.lotto : latest.pension}
-            value={kind === 'lotto' ? round.lotto : round.pension}
-            onChange={(r) => setRound((s) => ({...s, [kind]: r}))}
+            latest={curLatest}
+            value={curRound}
+            onChange={(r) => setRound((s) => ({ ...s, [kind]: r }))}
           />
 
           {kind === 'lotto' && lotto && <LottoResultCard result={lotto} />}
