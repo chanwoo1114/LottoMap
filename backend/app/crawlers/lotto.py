@@ -6,8 +6,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, client_session, delay, get_client,
-    insert_bootstrap_failure, resolve_bootstrap_failure,
+    BASE_URL, client_session, get_client, run_bulk, run_retry,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,69 +119,31 @@ async def crawl_and_save_all_lotto_results(
     """초기 1회 전체 회차 적재"""
     logger.info(f"[START] crawl_lotto range={start_round}~{latest_round}")
 
-    total = 0
-    failures: list[str] = []
-    async with client_session() as client:
-        calls = list(range(start_round + 9, latest_round, 10))
-        calls.append(latest_round)
+    calls = list(range(start_round + 9, latest_round, 10))
+    calls.append(latest_round)
 
-        for n in calls:
-            sub_key = str(n)
-            try:
-                results = await crawl_lotto_round(n, client=client)
-                if results:
-                    total += await save_lotto_results_to_db(results)
-            except Exception as e:
-                failures.append(sub_key)
-                try:
-                    await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                except Exception as db_e:
-                    logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
-                logger.error(f"[FAIL] srchLtEpsd={n}: {e}")
-            await delay()
+    async def _one(client: httpx.AsyncClient, n: int) -> int:
+        results = await crawl_lotto_round(n, client=client)
+        return await save_lotto_results_to_db(results) if results else 0
 
-    missing = await find_missing_lotto_rounds(latest_round, start_round)
+    result = await run_bulk(_TASK_NAME, calls, _one)
+    result["missing"] = await find_missing_lotto_rounds(latest_round, start_round)
     logger.info(
-        f"[END] crawl_lotto: saved={total}, failures={len(failures)}, "
-        f"missing={len(missing)}"
+        f"[END] crawl_lotto: saved={result['saved']}, "
+        f"failures={len(result['failures'])}, missing={len(result['missing'])}"
     )
-    return {"saved": total, "failures": failures, "missing": missing}
+    return result
 
 
 async def retry_lotto_sub_keys(sub_keys: list[str]) -> dict:
     """실패 회차 재시도"""
-    if not sub_keys:
-        return {"resolved": [], "still_failed": []}
+    async def _one(client: httpx.AsyncClient, sub_key: str) -> None:
+        n = int(sub_key)
+        results = await crawl_lotto_round(n, client=client)
+        if results:
+            await save_lotto_results_to_db(results)
 
-    logger.info(f"[RETRY] lotto {len(sub_keys)}건 재시도")
-    resolved: list[str] = []
-    still_failed: list[str] = []
-
-    async with client_session() as client:
-        for sub_key in sub_keys:
-            try:
-                n = int(sub_key)
-            except ValueError:
-                logger.warning(f"[RETRY] lotto sub_key 파싱 실패: {sub_key}")
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                continue
-            try:
-                results = await crawl_lotto_round(n, client=client)
-                if results:
-                    await save_lotto_results_to_db(results)
-                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
-                resolved.append(sub_key)
-            except Exception as e:
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                logger.warning(f"[RETRY] lotto {sub_key} 여전히 실패: {e}")
-            await delay()
-
-    logger.info(
-        f"[RETRY] lotto: resolved={len(resolved)}, still_failed={len(still_failed)}"
-    )
-    return {"resolved": resolved, "still_failed": still_failed}
+    return await run_retry(_TASK_NAME, sub_keys, _one)
 
 
 async def crawl_latest_lotto_round() -> dict:

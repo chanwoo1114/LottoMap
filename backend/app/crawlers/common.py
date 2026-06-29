@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 
@@ -81,3 +83,65 @@ async def get_pending_bootstrap_failures(task_name: str) -> list[str]:
         task_name,
     )
     return [r["sub_key"] for r in rows]
+
+
+async def run_bulk(
+    task_name: str,
+    keys: list,
+    process: Callable[[httpx.AsyncClient, Any], Awaitable[int]],
+    *,
+    delay_lo: int = 5,
+    delay_hi: int = 10,
+) -> dict:
+    """각 key를 process(client, key)로 처리(저장 건수 반환).
+    예외 시 bootstrap_failures에 기록하고 다음 key로. 하나의 client_session을 공유하고
+    key 사이에 delay. {"saved": N, "failures": [str(key), ...]}."""
+    total = 0
+    failures: list[str] = []
+    async with client_session() as client:
+        for key in keys:
+            sub_key = str(key)
+            try:
+                total += await process(client, key)
+            except Exception as e:
+                failures.append(sub_key)
+                try:
+                    await insert_bootstrap_failure(task_name, sub_key)
+                except Exception as db_e:
+                    logger.warning(f"[FAIL-LOG] {sub_key} DB 기록 실패: {db_e}")
+                logger.error(f"[FAIL] {task_name} {sub_key}: {e}")
+            await delay(delay_lo, delay_hi)
+    return {"saved": total, "failures": failures}
+
+
+async def run_retry(
+    task_name: str,
+    sub_keys: list[str],
+    process: Callable[[httpx.AsyncClient, str], Awaitable[None]],
+    *,
+    delay_lo: int = 5,
+    delay_hi: int = 10,
+) -> dict:
+    """실패 sub_key 재시도. process(client, sub_key)가 fetch+save 수행(예외 시 실패).
+    성공→resolve, 실패→재기록. {"resolved": [...], "still_failed": [...]}."""
+    if not sub_keys:
+        return {"resolved": [], "still_failed": []}
+
+    logger.info(f"[RETRY] {task_name} {len(sub_keys)}건")
+    resolved: list[str] = []
+    still_failed: list[str] = []
+    async with client_session() as client:
+        for sub_key in sub_keys:
+            try:
+                await process(client, sub_key)
+                await resolve_bootstrap_failure(task_name, sub_key)
+                resolved.append(sub_key)
+            except Exception as e:
+                await insert_bootstrap_failure(task_name, sub_key)
+                still_failed.append(sub_key)
+                logger.warning(f"[RETRY] {task_name} {sub_key} 여전히 실패: {e}")
+            await delay(delay_lo, delay_hi)
+    logger.info(
+        f"[RETRY] {task_name}: resolved={len(resolved)}, still_failed={len(still_failed)}"
+    )
+    return {"resolved": resolved, "still_failed": still_failed}

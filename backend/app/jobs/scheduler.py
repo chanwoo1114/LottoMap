@@ -14,7 +14,6 @@ from app.crawlers.winning_stores import (
     crawl_all_winning_stores, retry_winning_sub_keys,
 )
 from app.crawlers.common import get_pending_bootstrap_failures
-from app.jobs.predictions_job import generate_for_next_round, score_latest_round
 
 logger = logging.getLogger(__name__)
 
@@ -98,22 +97,6 @@ def _build_scheduler() -> AsyncIOScheduler:
         crawl_all_winning_stores,
         IntervalTrigger(hours=1),
         id="crawl_winning_stores",
-        replace_existing=True,
-    )
-
-    # 예측 채점 — 토요일 23:00 KST (로또 수집 이후)
-    sched.add_job(
-        score_latest_round,
-        CronTrigger(day_of_week="sat", hour=23, minute=0, timezone=KST),
-        id="score_predictions",
-        replace_existing=True,
-    )
-
-    # 다음 회차 예측 생성 — 일요일 05:00 KST
-    sched.add_job(
-        generate_for_next_round,
-        CronTrigger(day_of_week="sun", hour=5, minute=0, timezone=KST),
-        id="generate_predictions",
         replace_existing=True,
     )
 

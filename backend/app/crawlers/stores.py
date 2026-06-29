@@ -6,7 +6,7 @@ import httpx
 from app.core.database import get_pool
 from app.crawlers.common import (
     BASE_URL, client_session, delay,
-    insert_bootstrap_failure, resolve_bootstrap_failure,
+    insert_bootstrap_failure, run_retry,
 )
 from app.crawlers.regions import CTPV_MAP
 
@@ -258,42 +258,14 @@ async def crawl_all_stores() -> dict:
 
 async def retry_stores_sub_keys(sub_keys: list[str]) -> dict:
     """'page:N' 리스트 재시도. {"resolved": [...], "still_failed": [...]} 반환."""
-    if not sub_keys:
-        return {"resolved": [], "still_failed": []}
+    async def _one(client: httpx.AsyncClient, sub_key: str) -> None:
+        if not sub_key.startswith("page:"):
+            raise ValueError(f"미지원 sub_key: {sub_key}")
+        page = int(sub_key.split(":", 1)[1])
+        data = await _fetch_page(client, page)
+        items = data.get("list") or []
+        stores = [s for it in items if (s := _parse_item(it)) is not None]
+        if stores:
+            await upsert_stores(stores)
 
-    logger.info(f"[RETRY] stores {len(sub_keys)}건")
-    resolved: list[str] = []
-    still_failed: list[str] = []
-
-    async with client_session() as client:
-        for sub_key in sub_keys:
-            if not sub_key.startswith("page:"):
-                logger.warning(f"[RETRY] stores 미지원 sub_key (legacy?): {sub_key}")
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                continue
-            try:
-                page = int(sub_key.split(":", 1)[1])
-            except ValueError:
-                logger.warning(f"[RETRY] stores page 파싱 실패: {sub_key}")
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                continue
-            try:
-                data = await _fetch_page(client, page)
-                items = data.get("list") or []
-                stores = [s for it in items if (s := _parse_item(it)) is not None]
-                if stores:
-                    await upsert_stores(stores)
-                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
-                resolved.append(sub_key)
-            except Exception as e:
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                logger.warning(f"[RETRY] stores {sub_key} 여전히 실패: {e}")
-            await delay()
-
-    logger.info(
-        f"[RETRY] stores: resolved={len(resolved)}, still_failed={len(still_failed)}"
-    )
-    return {"resolved": resolved, "still_failed": still_failed}
+    return await run_retry(_TASK_NAME, sub_keys, _one)

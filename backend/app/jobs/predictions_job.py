@@ -3,7 +3,9 @@ import logging
 from app.core.database import get_pool
 from app.services.generators.cache import generator_cache
 from app.services.generators.statistical import StatisticalGeneratorV3
-from app.services.predictions_service import save_predictions, score_round
+from app.services.predictions_service import (
+    save_predictions, score_round, get_round_predictions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,43 @@ async def score_latest_round() -> dict:
     updated = await score_round(pool, last)
     logger.info(f"[END] score_predictions: round={last}, scored={updated}")
     return {"round": last, "scored": updated}
+
+
+_PRED_LOCK_NS = 7242
+
+
+async def get_or_create_round_predictions(round_no: int) -> dict | None:
+    """
+    - 있으면: 추첨됐는데 미채점이면 채점 후 반환
+    - 없고 '다음 회차(추첨 전)'면: 생성 후 반환
+    - 과거인데 없으면: None
+    """
+    pool = await get_pool()
+
+    existing = await get_round_predictions(pool, round_no)
+    if existing is not None:
+        # 추첨 끝났는데 미채점이면 채점 (멱등)
+        if existing["draw_date"] is not None and any(
+            p["hit_count"] is None for p in existing["predictions"]
+        ):
+            await score_round(pool, round_no)
+            existing = await get_round_predictions(pool, round_no)
+        return existing
+
+    # 없음 — 다음 회차(추첨 전)일 때만 생성
+    latest = await _latest_round(pool)
+    if latest is None or round_no != latest + 1:
+        return None
+
+    # 동시 첫조회 직렬화 (레이스 → 중복 생성 방지)
+    async with pool.acquire() as conn:
+        await conn.execute("SELECT pg_advisory_lock($1, $2)", _PRED_LOCK_NS, round_no)
+        try:
+            if await get_round_predictions(pool, round_no) is None:
+                await generate_for_next_round()      # latest+1 == round_no
+            return await get_round_predictions(pool, round_no)
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock($1, $2)", _PRED_LOCK_NS, round_no)
 
 
 if __name__ == "__main__":

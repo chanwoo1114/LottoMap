@@ -3,10 +3,7 @@ import logging
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import (
-    BASE_URL, client_session, delay,
-    insert_bootstrap_failure, resolve_bootstrap_failure,
-)
+from app.crawlers.common import BASE_URL, run_bulk, run_retry
 
 logger = logging.getLogger(__name__)
 
@@ -210,8 +207,6 @@ async def crawl_all_winning_stores(
     {"saved": N, "failures": [sub_keys]} 반환. sub_key는 'game_type/round/rank' 포맷."""
     logger.info("[START] crawl_winning_stores")
 
-    total_saved = 0
-    failures: list[str] = []
     # selectLtWnShp.do 는 1~216 회차 데이터 미제공, 262 부터 안정적
     lotto_rounds = await _get_rounds_from_db("lotto_results", min_round=262)
     pension_rounds = await _get_rounds_from_db("pension_results")
@@ -231,42 +226,33 @@ async def crawl_all_winning_stores(
         f"(범위: {min(speetto_rounds.get('st500') or [0])}~{max(speetto_rounds.get('st500') or [0])})"
     )
 
-    async with client_session() as client:
-        plan = [
-            ("lt645", lotto_rounds),
-            ("pt720", pension_rounds),
-            ("st2000", speetto_rounds.get("st2000") or []),
-            ("st1000", speetto_rounds.get("st1000") or []),
-            ("st500", speetto_rounds.get("st500") or []),
-        ]
-        for game_type, rounds in plan:
-            if not rounds:
-                logger.warning(f"[WIN] {game_type} 회차 목록 없음, skip")
-                continue
-            logger.info(f"[WIN] {game_type}: rounds={len(rounds)}")
-            for rnd in rounds:
-                sub_key = f"{game_type}/{rnd}"
-                try:
-                    items = await _fetch_winning(client, game_type, rnd)
-                    rows = [
-                        r for it in items
-                        if (r := _to_row(game_type, rnd, it)) is not None
-                    ]
-                    if rows:
-                        total_saved += await _save_rows(rows)
-                except Exception as e:
-                    failures.append(sub_key)
-                    try:
-                        await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                    except Exception as db_e:
-                        logger.warning(f"[FAIL-LOG] DB 기록 실패: {db_e}")
-                    logger.warning(f"[WIN] {sub_key} 실패: {e}")
-                await delay(delay_lo, delay_hi)
+    plan = [
+        ("lt645", lotto_rounds),
+        ("pt720", pension_rounds),
+        ("st2000", speetto_rounds.get("st2000") or []),
+        ("st1000", speetto_rounds.get("st1000") or []),
+        ("st500", speetto_rounds.get("st500") or []),
+    ]
+    keys: list[str] = []
+    for game_type, rounds in plan:
+        if not rounds:
+            logger.warning(f"[WIN] {game_type} 회차 목록 없음, skip")
+            continue
+        logger.info(f"[WIN] {game_type}: rounds={len(rounds)}")
+        keys.extend(f"{game_type}/{rnd}" for rnd in rounds)
 
+    async def _one(client: httpx.AsyncClient, key: str) -> int:
+        game_type, rnd_s = key.split("/")
+        rnd = int(rnd_s)
+        items = await _fetch_winning(client, game_type, rnd)
+        rows = [r for it in items if (r := _to_row(game_type, rnd, it)) is not None]
+        return await _save_rows(rows) if rows else 0
+
+    result = await run_bulk(_TASK_NAME, keys, _one, delay_lo=delay_lo, delay_hi=delay_hi)
     logger.info(
-        f"[END] crawl_winning_stores: saved={total_saved}, failures={len(failures)}"
+        f"[END] crawl_winning_stores: saved={result['saved']}, failures={len(result['failures'])}"
     )
-    return {"saved": total_saved, "failures": failures}
+    return result
 
 
 async def retry_winning_sub_keys(
@@ -274,51 +260,14 @@ async def retry_winning_sub_keys(
 ) -> dict:
     """주어진 'game_type/round' 리스트 재시도.
     {"resolved": [...], "still_failed": [...]} 반환."""
-    if not sub_keys:
-        return {"resolved": [], "still_failed": []}
+    async def _one(client: httpx.AsyncClient, sub_key: str) -> None:
+        game_type, rnd_s = sub_key.split("/")
+        rnd = int(rnd_s)
+        if game_type not in _RANK_FILTER:
+            raise ValueError(f"미지원 game_type: {game_type}")
+        items = await _fetch_winning(client, game_type, rnd)
+        rows = [r for it in items if (r := _to_row(game_type, rnd, it)) is not None]
+        if rows:
+            await _save_rows(rows)
 
-    logger.info(f"[RETRY] winning {len(sub_keys)}건")
-    resolved: list[str] = []
-    still_failed: list[str] = []
-
-    async with client_session() as client:
-        for sub_key in sub_keys:
-            parts = sub_key.split("/")
-            if len(parts) != 2:
-                logger.warning(f"[RETRY] winning sub_key 파싱 실패: {sub_key}")
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                continue
-            game_type, rnd_s = parts
-            try:
-                rnd = int(rnd_s)
-            except ValueError:
-                logger.warning(f"[RETRY] winning round 파싱 실패: {sub_key}")
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                continue
-            if game_type not in _RANK_FILTER:
-                logger.warning(f"[RETRY] winning 미지원 game_type: {game_type}")
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                continue
-            try:
-                items = await _fetch_winning(client, game_type, rnd)
-                rows = [
-                    r for it in items
-                    if (r := _to_row(game_type, rnd, it)) is not None
-                ]
-                if rows:
-                    await _save_rows(rows)
-                await resolve_bootstrap_failure(_TASK_NAME, sub_key)
-                resolved.append(sub_key)
-            except Exception as e:
-                await insert_bootstrap_failure(_TASK_NAME, sub_key)
-                still_failed.append(sub_key)
-                logger.warning(f"[RETRY] winning {sub_key} 여전히 실패: {e}")
-            await delay(delay_lo, delay_hi)
-
-    logger.info(
-        f"[RETRY] winning: resolved={len(resolved)}, still_failed={len(still_failed)}"
-    )
-    return {"resolved": resolved, "still_failed": still_failed}
+    return await run_retry(_TASK_NAME, sub_keys, _one, delay_lo=delay_lo, delay_hi=delay_hi)

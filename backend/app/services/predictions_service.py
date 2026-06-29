@@ -118,3 +118,48 @@ async def list_recent_predictions(
             "scored_at": r["scored_at"],
         })
     return [grouped[k] for k in sorted(grouped.keys(), reverse=True)]
+
+async def get_round_predictions(
+    pool: asyncpg.Pool, round_no: int
+) -> dict | None:
+    """한 회차의 예측 + 실제 당첨번호. 없으면 None."""
+    rows = await pool.fetch(
+        """
+        SELECT
+            p.id, p.target_round, p.model, p.strategy,
+            p.numbers, p.confidence, p.hit_count, p.matched_bonus,
+            p.created_at, p.scored_at,
+            r.draw_date,
+            r.num1, r.num2, r.num3, r.num4, r.num5, r.num6, r.bonus
+        FROM ai_predictions p
+        LEFT JOIN lotto_results r ON r.round_no = p.target_round
+        WHERE p.target_round = $1
+        ORDER BY p.hit_count DESC NULLS LAST, p.model, p.strategy, p.id
+        """,
+        round_no,
+    )
+    if not rows:
+        return None
+
+    first = rows[0]
+    has_result = first["num1"] is not None
+    return {
+        "target_round": round_no,
+        "draw_date": first["draw_date"],
+        "winning_numbers": (
+            sorted([first["num1"], first["num2"], first["num3"],
+                    first["num4"], first["num5"], first["num6"]])
+            if has_result else None
+        ),
+        "bonus": first["bonus"] if has_result else None,
+        "predictions": [
+            {
+                "id": r["id"], "model": r["model"],
+                "strategy": r["strategy"] or None,
+                "numbers": list(r["numbers"]), "confidence": r["confidence"],
+                "hit_count": r["hit_count"], "matched_bonus": r["matched_bonus"],
+                "created_at": r["created_at"], "scored_at": r["scored_at"],
+            }
+            for r in rows
+        ],
+    }
