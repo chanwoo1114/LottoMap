@@ -26,10 +26,11 @@ INSERT INTO speetto_games (
     sale_end_date, prize_claim_end_date, image_url,
     total_first_prizes, remaining_first_prizes,
     total_second_prizes, remaining_second_prizes,
+    total_third_prizes, remaining_third_prizes,
     intake_rate, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13, NOW()
+    $9, $10, $11, $12, $13, $14, $15, NOW()
 )
 ON CONFLICT (game_id) DO UPDATE SET
     name                    = EXCLUDED.name,
@@ -43,6 +44,8 @@ ON CONFLICT (game_id) DO UPDATE SET
     remaining_first_prizes  = EXCLUDED.remaining_first_prizes,
     total_second_prizes     = EXCLUDED.total_second_prizes,
     remaining_second_prizes = EXCLUDED.remaining_second_prizes,
+    total_third_prizes      = EXCLUDED.total_third_prizes,
+    remaining_third_prizes  = EXCLUDED.remaining_third_prizes,
     intake_rate             = EXCLUDED.intake_rate,
     updated_at              = NOW()
 """
@@ -86,6 +89,7 @@ def _parse_item(item: dict) -> dict | None:
 
     remain1, total1 = _parse_rt(item.get("stRnk1Rt"))
     remain2, total2 = _parse_rt(item.get("stRnk2Rt"))
+    remain3, total3 = _parse_rt(item.get("stRnk3Rt"))
 
     return {
         "game_id": f"{game_type}_{round_no}",
@@ -100,6 +104,8 @@ def _parse_item(item: dict) -> dict | None:
         "remaining_first_prizes": remain1,
         "total_second_prizes": total2,
         "remaining_second_prizes": remain2,
+        "total_third_prizes": total3,
+        "remaining_third_prizes": remain3,
         "intake_rate": int(item.get("stSpmtRt") or 0),
     }
 
@@ -155,6 +161,7 @@ async def save_speetto_to_db(games: list[dict]) -> int:
             g["sale_end_date"], g["prize_claim_end_date"], g["image_url"],
             g["total_first_prizes"], g["remaining_first_prizes"],
             g["total_second_prizes"], g["remaining_second_prizes"],
+            g["total_third_prizes"], g["remaining_third_prizes"],
             g["intake_rate"],
         )
         for g in games

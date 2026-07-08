@@ -126,6 +126,8 @@ CREATE TABLE speetto_games (
     remaining_first_prizes  INTEGER DEFAULT 0,
     total_second_prizes     INTEGER DEFAULT 0,
     remaining_second_prizes INTEGER DEFAULT 0,
+    total_third_prizes      INTEGER DEFAULT 0,
+    remaining_third_prizes  INTEGER DEFAULT 0,
     intake_rate             SMALLINT DEFAULT 0,
     updated_at              TIMESTAMPTZ DEFAULT NOW()
 );
@@ -151,6 +153,8 @@ COMMENT ON COLUMN speetto_games.total_first_prizes IS '해당 회차 1등 총 �
 COMMENT ON COLUMN speetto_games.remaining_first_prizes IS '1등 잔여 매수';
 COMMENT ON COLUMN speetto_games.total_second_prizes IS '2등 총 발행 매수';
 COMMENT ON COLUMN speetto_games.remaining_second_prizes IS '2등 잔여 매수';
+COMMENT ON COLUMN speetto_games.total_third_prizes IS '3등 총 발행 매수';
+COMMENT ON COLUMN speetto_games.remaining_third_prizes IS '3등 잔여 매수';
 COMMENT ON COLUMN speetto_games.intake_rate IS '전국 판매점 입고율 (%)';
 COMMENT ON COLUMN speetto_games.updated_at IS '최근 크롤링 갱신 일시';
 
