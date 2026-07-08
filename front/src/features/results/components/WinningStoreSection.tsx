@@ -10,8 +10,11 @@ const METHOD: Record<string, { label: string; cls: string }> = {
 }
 
 const RANKS: Record<string, { label: string; rank: number }[]> = {
-  lotto:   [{ label: '1등', rank: 1 }, { label: '2등', rank: 2 }],
-  pension: [{ label: '1등', rank: 1 }, { label: '2등', rank: 2 }, { label: '보너스', rank: 3 }],
+  lotto:        [{ label: '1등', rank: 1 }, { label: '2등', rank: 2 }],
+  pension:      [{ label: '1등', rank: 1 }, { label: '2등', rank: 2 }, { label: '보너스', rank: 3 }],
+  speetto_2000: [{ label: '1등', rank: 1 }, { label: '2등', rank: 2 }],
+  speetto_1000: [{ label: '1등', rank: 1 }],
+  speetto_500:  [{ label: '1등', rank: 1 }],
 }
 
 interface WinningStoreSectionProps {

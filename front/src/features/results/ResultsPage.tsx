@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  getLatestLotto, getLatestPension, getLottoByRound, getPensionByRound,
-  type LottoResult, type PensionResult, type WinningStore,
+  getLatestLotto, getLatestPension, getLottoByRound, getPensionByRound, getSpeettoGames,
+  type LottoResult, type PensionResult, type SpeettoGame, type WinningStore,
 } from './api'
 
 import { RoundSelector } from './components/RoundSelector'
@@ -11,6 +11,8 @@ import { WinningStoreSection } from './components/WinningStoreSection'
 import { PensionResultCard } from './components/PensionResultCard'
 import { LottoPrizeStructure } from './components/LottoPrizeStructure'
 import { PensionPrizeStructure } from './components/PensionPrizeStructure'
+import { SpeettoGameCard } from './components/SpeettoGameCard'
+import { SpeettoWinningSection } from './components/SpeettoWinningSection'
 
 type Kind = 'lotto' | 'pension' | 'speetto'
 
@@ -21,6 +23,8 @@ export function ResultsPage() {
   const [round, setRound] = useState({ lotto: 0, pension: 0 })
   const [lotto, setLotto] = useState<LottoResult | null>(null)
   const [pension, setPension] = useState<PensionResult | null>(null)
+  const [speetto, setSpeetto] = useState<SpeettoGame[]>([])
+  const [focusGame, setFocusGame] = useState<SpeettoGame | null>(null)
 
   useEffect(() => {
     getLatestLotto()
@@ -38,6 +42,8 @@ export function ResultsPage() {
         setPension(r)
       })
       .catch(() => {})
+
+    getSpeettoGames().then(setSpeetto).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -68,26 +74,44 @@ export function ResultsPage() {
           ))}
         </div>
 
-        <>
-          <RoundSelector
-            latest={curLatest}
-            value={curRound}
-            onChange={(r) => setRound((s) => ({ ...s, [kind]: r }))}
-          />
+        {kind === 'speetto' ? (
+          <>
+            <p className="flex items-center justify-between text-sm text-gray-500">
+              <span>판매 중인 게임의 <b className="text-gray-700">1등이 아직 남았는지</b> 확인하세요</span>
+            </p>
 
-          {kind === 'lotto' && lotto && <LottoResultCard result={lotto} />}
-          {kind === 'pension' && pension && <PensionResultCard result={pension} />}
+            <div className="space-y-3">
+              {speetto.map((g) => (
+                <SpeettoGameCard key={g.game_id} game={g} onClick={() => setFocusGame(g)} />
+              ))}
+              {speetto.length === 0 && (
+                <p className="py-8 text-center text-sm text-gray-400">판매 중인 스피또 정보가 없어요</p>
+              )}
+            </div>
 
-          <WinningStoreSection
-            lotteryType={kind}
-            roundNo={curRound}
-            onShowOnMap={showOnMap}
-          />
+            <SpeettoWinningSection games={speetto} focusGame={focusGame} onShowOnMap={showOnMap} />
+          </>
+        ) : (
+          <>
+            <RoundSelector
+              latest={curLatest}
+              value={curRound}
+              onChange={(r) => setRound((s) => ({ ...s, [kind]: r }))}
+            />
 
-          {kind === 'lotto' && <LottoPrizeStructure />}
-          {kind === 'pension' && <PensionPrizeStructure />}
+            {kind === 'lotto' && lotto && <LottoResultCard result={lotto} />}
+            {kind === 'pension' && pension && <PensionResultCard result={pension} />}
 
-        </>
+            <WinningStoreSection
+              lotteryType={kind}
+              roundNo={curRound}
+              onShowOnMap={showOnMap}
+            />
+
+            {kind === 'lotto' && <LottoPrizeStructure />}
+            {kind === 'pension' && <PensionPrizeStructure />}
+          </>
+        )}
       </div>
     </div>
   );
