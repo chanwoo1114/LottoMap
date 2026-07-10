@@ -7,11 +7,11 @@ function ballColor(n: number): string {
   return '#b0d840'
 }
 
-export function LottoBall({ n, size=40 }: { n: number; size?: number }) {
+export function LottoBall({ n, size=40, dim=false }: { n: number; size?: number; dim?: boolean }) {
   return (
     <span
-      className='grid shrink-0 place-items-center rounded-full font-bold text-white'
-      style={{ width: size, height: size, background: ballColor(n) }}
+      className='grid shrink-0 place-items-center rounded-full font-bold text-white transition-opacity'
+      style={{ width: size, height: size, background: ballColor(n), opacity: dim ? 0.28 : 1 }}
     >
       {n}
     </span>

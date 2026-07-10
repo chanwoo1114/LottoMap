@@ -7,21 +7,12 @@ export type PensionStrategy = 'balanced' | 'hot' | 'cold' | 'random'
 
 export interface LottoSet {
   numbers: number[]
-  sum: number
-  ac_value: number
-  odd_even: string
-  consecutive_pairs: number
-  pattern_score?: number   // 통계 생성기
   confidence?: number      // AI 생성기
 }
 
 export interface PensionSet {
   group: number
   number: string
-  digits: number[]
-  sum: number
-  unique_digits: number
-  max_repeat: number
 }
 
 interface GenResponse<T> {

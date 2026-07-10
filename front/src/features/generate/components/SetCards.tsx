@@ -29,6 +29,22 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+function SaveButton({ saved, onClick }: { saved: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={saved ? '저장됨 — 눌러서 해제' : '번호 저장'}
+      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border p-0 transition ${
+        saved ? 'border-amber-400 text-amber-500' : 'border-gray-200 text-gray-400 hover:bg-gray-50'
+      }`}
+    >
+      <svg width='16' height='16' viewBox='0 0 24 24' fill={saved ? 'currentColor' : 'none'} stroke='currentColor' strokeWidth='2'>
+        <path d='M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z' />
+      </svg>
+    </button>
+  )
+}
+
 function StatBadge({ children, green }: { children: ReactNode; green?: boolean }) {
   return (
     <span
@@ -41,20 +57,24 @@ function StatBadge({ children, green }: { children: ReactNode; green?: boolean }
   )
 }
 
-export function LottoSetCard({ set, index }: { set: LottoSet; index: number }) {
+export function LottoSetCard({ set, index, saved, onToggleSave }: {
+  set: LottoSet
+  index: number
+  saved?: boolean
+  onToggleSave?: () => void
+}) {
   return (
     <li className='flex items-center gap-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm'>
       <span className='w-6 shrink-0 text-center text-sm font-bold text-gray-300'>{index + 1}</span>
       <div className='flex flex-1 flex-wrap items-center gap-1.5'>
         {set.numbers.map((n) => <LottoBall key={n} n={n} size={36} />)}
       </div>
-      <div className='flex shrink-0 flex-col items-end gap-1'>
-        {set.confidence != null && <StatBadge green>신뢰도 {set.confidence}</StatBadge>}
-        <StatBadge>합 <b className='text-gray-700'>{set.sum}</b></StatBadge>
-        <StatBadge>AC <b className='text-gray-700'>{set.ac_value}</b></StatBadge>
-        <StatBadge>홀짝 <b className='text-gray-700'>{set.odd_even}</b></StatBadge>
-        {set.pattern_score != null && <StatBadge>패턴 <b className='text-gray-700'>{Math.round(set.pattern_score)}</b></StatBadge>}
-      </div>
+      {set.confidence != null && (
+        <div className='flex shrink-0 flex-col items-end gap-1'>
+          <StatBadge green>신뢰도 {set.confidence}</StatBadge>
+        </div>
+      )}
+      {onToggleSave && <SaveButton saved={!!saved} onClick={onToggleSave} />}
       <CopyButton text={set.numbers.join(', ')} />
     </li>
   )

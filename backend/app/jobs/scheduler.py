@@ -14,6 +14,7 @@ from app.crawlers.winning_stores import (
     crawl_all_winning_stores, retry_winning_sub_keys,
 )
 from app.crawlers.common import get_pending_bootstrap_failures
+from app.jobs.saved_numbers_job import score_saved_numbers_job
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,14 @@ def _build_scheduler() -> AsyncIOScheduler:
         crawl_latest_lotto_round,
         CronTrigger(day_of_week="sat", hour=21, minute=0, timezone=KST),
         id="crawl_lotto_latest",
+        replace_existing=True,
+    )
+
+    # 저장 번호 채점 — 로또 수집 직후(토 21:10) 미채점분 일괄 대조
+    sched.add_job(
+        score_saved_numbers_job,
+        CronTrigger(day_of_week="sat", hour=21, minute=10, timezone=KST),
+        id="score_saved_numbers",
         replace_existing=True,
     )
 

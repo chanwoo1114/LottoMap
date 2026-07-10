@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { getApiErrorMessage } from '@/lib/api'
+import { useAuth } from '@/features/auth/AuthContext'
+import { AuthModal } from '@/features/auth/components/AuthModal'
+import { useSavedNumbers } from '@/features/savedNumbers/hooks/useSavedNumbers'
 import {
   genStatistical, genAI, genPension,
   type Engine, type StatStrategy, type PensionStrategy, type LottoSet, type PensionSet,
@@ -24,6 +27,17 @@ export function GeneratePage() {
   const [error, setError] = useState('')
   const [lotto, setLotto] = useState<LottoSet[]>([])
   const [pension, setPension] = useState<PensionSet[]>([])
+
+  const { isAuthenticated } = useAuth()
+  const [authOpen, setAuthOpen] = useState(false)
+  const saved = useSavedNumbers(isAuthenticated)
+
+  const toggleSave = (numbers: number[]) => {
+    if (!isAuthenticated) { setAuthOpen(true); return }
+    const id = saved.savedIdFor(numbers)
+    if (id != null) saved.remove(id)
+    else saved.save(numbers).catch(() => {})
+  }
 
   const reset = () => { setLotto([]); setPension([]); setError('') }
   const switchEngine = (e: Engine) => { setEngine(e); reset() }
@@ -186,7 +200,15 @@ export function GeneratePage() {
 
         {lotto.length > 0 && (
           <ul className='space-y-2.5'>
-            {lotto.map((s, i) => <LottoSetCard key={i} set={s} index={i} />)}
+            {lotto.map((s, i) => (
+              <LottoSetCard
+                key={i}
+                set={s}
+                index={i}
+                saved={isAuthenticated && saved.savedIdFor(s.numbers) != null}
+                onToggleSave={() => toggleSave(s.numbers)}
+              />
+            ))}
           </ul>
         )}
         {pension.length > 0 && (
@@ -197,6 +219,8 @@ export function GeneratePage() {
 
         {empty && <p className='pb-4 text-center text-xs text-gray-400'>전략을 고르고 생성하기를 누르세요</p>}
       </div>
+
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   )
 }
