@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import type { Store } from '@/features/store/api'
+import { useEffect, useState, type ReactNode } from 'react'
+import { getWinningStats, type Store, type WinningStats } from '@/features/store/api'
 import { getProducts } from '../model'
 import { ProductBadge } from './ProductBadge'
 import { FavoriteButton } from './FavoriteButton'
@@ -13,6 +13,17 @@ interface StoreDetailProps {
 
 export function StoreDetail({ store, onClose, onShowOnMap, onRequireLogin }: StoreDetailProps) {
   const products = getProducts(store)
+  const [stats, setStats] = useState<WinningStats | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setStats(null)
+    getWinningStats(store.id)
+      .then((s) => { if (!cancelled) setStats(s) })
+      .catch(() => { if (!cancelled) setStats(null) })
+    return () => { cancelled = true }
+  }, [store.id])
+
   const region = [store.sido, store.sigungu, store.dong].filter(Boolean).join(' ')
   const kakaoLink =
     store.lat != null && store.lng != null
@@ -49,6 +60,8 @@ export function StoreDetail({ store, onClose, onShowOnMap, onRequireLogin }: Sto
             ))}
           </div>
         )}
+
+        {stats && <WinningStatsCard stats={stats} />}
 
         <dl className="mt-5 space-y-3 text-sm">
           <InfoRow label="주소">
@@ -91,6 +104,59 @@ export function StoreDetail({ store, onClose, onShowOnMap, onRequireLogin }: Sto
         )}
       </div>
     </div>
+  )
+}
+
+function WinningStatsCard({ stats }: { stats: WinningStats }) {
+  const groups = [
+    { type: '로또', first: stats.lotto_first, second: stats.lotto_second },
+    { type: '연금복권', first: stats.pension_first, second: stats.pension_second },
+    { type: '스피또', first: stats.speetto_first, second: stats.speetto_second },
+  ].filter((g) => g.first > 0 || g.second > 0)
+
+  if (stats.total === 0) {
+    return (
+      <p className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-400">
+        아직 당첨 배출 이력이 없어요
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+      <p className="text-xs font-medium text-amber-800">🏆 당첨 배출 이력</p>
+      <ul className="mt-2 space-y-1.5">
+        {groups.length > 0 ? (
+          groups.map((g) => (
+            <li key={g.type} className="flex items-center gap-2 text-sm">
+              <span className="w-16 shrink-0 font-medium text-gray-700">{g.type}</span>
+              <span className="flex flex-wrap gap-1.5">
+                {g.first > 0 && <RankChip rank="1등" count={g.first} strong />}
+                {g.second > 0 && <RankChip rank="2등" count={g.second} />}
+              </span>
+            </li>
+          ))
+        ) : (
+          <li className="text-sm">
+            <RankChip rank="당첨" count={stats.total} strong />
+          </li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+function RankChip({ rank, count, strong }: { rank: string; count: number; strong?: boolean }) {
+  return (
+    <span
+      className={
+        'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ' +
+        (strong ? 'bg-amber-500 text-white' : 'bg-white text-amber-700 ring-1 ring-amber-200')
+      }
+    >
+      {rank}
+      <span className="font-bold">{count}회</span>
+    </span>
   )
 }
 

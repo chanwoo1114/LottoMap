@@ -66,6 +66,45 @@ async def get_store_by_id(pool: asyncpg.Pool, store_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_winning_stats(pool: asyncpg.Pool, store_id: int) -> dict:
+    """판매점의 복권 종류·등수별 당첨 배출 횟수 집계"""
+    rows = await pool.fetch("""
+        SELECT lottery_type, prize_rank, COUNT(*)::int AS cnt
+        FROM winning_stores
+        WHERE store_id = $1
+        GROUP BY lottery_type, prize_rank
+    """, store_id)
+
+    stats = {
+        "lotto_first": 0,
+        "lotto_second": 0,
+        "pension_first": 0,
+        "pension_second": 0,
+        "speetto_first": 0,
+        "speetto_second": 0,
+        "total": 0,
+    }
+    for r in rows:
+        lt, rank, cnt = r["lottery_type"], r["prize_rank"], r["cnt"]
+        stats["total"] += cnt
+        if lt == "lotto":
+            if rank == 1:
+                stats["lotto_first"] += cnt
+            elif rank == 2:
+                stats["lotto_second"] += cnt
+        elif lt == "pension":
+            if rank == 1:
+                stats["pension_first"] += cnt
+            elif rank == 2:
+                stats["pension_second"] += cnt
+        elif lt.startswith("speetto"):
+            if rank == 1:
+                stats["speetto_first"] += cnt
+            elif rank == 2:
+                stats["speetto_second"] += cnt
+    return stats
+
+
 async def get_nearby_stores(
     pool: asyncpg.Pool,
     min_lat: float, min_lng: float,

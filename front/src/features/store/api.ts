@@ -48,6 +48,19 @@ export const searchStores = (params: StoreSearchParams) =>
 export const getStoreById = (id: number) =>
   api.get<Store>(`/store/${id}`).then(r => r.data)
 
+export interface WinningStats {
+  lotto_first: number
+  lotto_second: number
+  pension_first: number
+  pension_second: number
+  speetto_first: number
+  speetto_second: number
+  total: number
+}
+
+export const getWinningStats = (id: number) =>
+  api.get<WinningStats>(`/store/${id}/winning-stats`).then(r => r.data)
+
 export const getFavorites = () =>
   api.get<Store[]>('/favorites').then((r) => r.data);
 

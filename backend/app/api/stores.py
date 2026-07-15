@@ -6,7 +6,7 @@ from app.core.database import get_pool
 from app.services import stores_service
 from app.schema.store_schema import (
     StoreQuery, StoreResponse,
-    NearbyStoreQuery,
+    NearbyStoreQuery, WinningStatsResponse,
 )
 
 router = APIRouter(prefix="/store", tags=["판매점"])
@@ -42,6 +42,19 @@ async def nearby_stores(
         q.max_lng,
         q.limit,
     )
+
+@router.get(
+    "/{store_id}/winning-stats",
+    response_model=WinningStatsResponse,
+    summary="판매점 당첨 배출 통계",
+)
+async def store_winning_stats(
+    store_id: int,
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """판매점의 로또/연금/스피또 당첨 배출 횟수 집계 반환"""
+    return await stores_service.get_winning_stats(pool, store_id)
+
 
 @router.get(
     "/{store_id}",

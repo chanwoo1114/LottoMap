@@ -40,3 +40,14 @@ class StoreResponse(BaseModel):
     sells_speetto_500: bool = Field(description="스피또500 판매 여부")
     lat: float | None = Field(None, ge=-90, le=90, description="위도 (EPSG:4326)")
     lng: float | None = Field(None, ge=-180, le=180, description="경도 (EPSG:4326)")
+
+
+class WinningStatsResponse(BaseModel):
+    """판매점 당첨 배출 통계"""
+    lotto_first: int = Field(0, description="로또 1등 배출 횟수")
+    lotto_second: int = Field(0, description="로또 2등 배출 횟수")
+    pension_first: int = Field(0, description="연금복권 1등 배출 횟수")
+    pension_second: int = Field(0, description="연금복권 2등 배출 횟수")
+    speetto_first: int = Field(0, description="스피또 1등 배출 횟수")
+    speetto_second: int = Field(0, description="스피또 2등 배출 횟수")
+    total: int = Field(0, description="전체 당첨 배출 횟수")
