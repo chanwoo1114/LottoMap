@@ -5,7 +5,7 @@ from app.schema.store_schema import StoreQuery
 
 async def search_stores(pool: asyncpg.Pool, q: StoreQuery) -> list[dict]:
     """판매점 검색 (지역/복권종류/주소)"""
-    conditions = ["is_active = TRUE"]
+    conditions = ["is_active = TRUE", "is_online = FALSE"]
     params: list = []
     idx = 1
 
@@ -119,6 +119,7 @@ async def get_nearby_stores(
                ST_Y(location) AS lat, ST_X(location) AS lng
         FROM stores
         WHERE is_active = TRUE
+            AND is_online = FALSE
             AND location && ST_MakeEnvelope($1, $2, $3, $4, 4326)
         LIMIT $5
     """, min_lng, min_lat, max_lng, max_lat, limit)

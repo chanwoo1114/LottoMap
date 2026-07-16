@@ -18,6 +18,8 @@ HEADERS = {
     "Referer": f"{BASE_URL}/prchsplcsrch/home",
 }
 
+ONLINE_SHOP_IDS = frozenset({"51100000", "001160", "00000000"})
+
 
 async def get_client() -> httpx.AsyncClient:
     '''초기 GET으로 세션 쿠키를 받아둔 AsyncClient 생성'''

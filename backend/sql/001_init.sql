@@ -26,6 +26,7 @@ CREATE TABLE stores (
     sells_speetto_1000  BOOLEAN DEFAULT FALSE,
     sells_speetto_500   BOOLEAN DEFAULT FALSE,
     is_active           BOOLEAN DEFAULT TRUE,
+    is_online           BOOLEAN NOT NULL DEFAULT FALSE,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
@@ -55,6 +56,7 @@ COMMENT ON COLUMN stores.sells_speetto_2000 IS '스피또2000 판매 여부';
 COMMENT ON COLUMN stores.sells_speetto_1000 IS '스피또1000 판매 여부';
 COMMENT ON COLUMN stores.sells_speetto_500 IS '스피또500 판매 여부';
 COMMENT ON COLUMN stores.is_active IS '영업 중 여부';
+COMMENT ON COLUMN stores.is_online IS '동행복권 인터넷 판매분 여부. 실물 점포가 아니므로 지도·검색에서 제외하되 당첨 이력은 보존';
 COMMENT ON COLUMN stores.created_at IS '최초 등록 일시';
 COMMENT ON COLUMN stores.updated_at IS '최근 수정 일시';
 

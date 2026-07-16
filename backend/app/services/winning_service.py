@@ -1,7 +1,7 @@
 import asyncpg
 
 _SELECT = """
-    SELECT s.id AS store_id, s.name, s.address, s.sido, s.sigungu,
+    SELECT s.id AS store_id, s.name, s.address, s.sido, s.sigungu, s.is_online,
            ST_Y(s.location) AS lat, ST_X(s.location) AS lng,
            w.prize_rank, w.prize_amount, w.purchase_method
     FROM winning_stores w

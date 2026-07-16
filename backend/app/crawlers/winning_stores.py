@@ -3,7 +3,7 @@ import logging
 import httpx
 
 from app.core.database import get_pool
-from app.crawlers.common import BASE_URL, run_bulk, run_retry
+from app.crawlers.common import BASE_URL, ONLINE_SHOP_IDS, run_bulk, run_retry
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +58,14 @@ WITH new_store AS (
         location,
         sells_lotto, sells_pension,
         sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
-        is_active
+        is_active, is_online
     )
     VALUES (
         $4, $5, $6, $7,
         $8, $9, $10,
         ST_SetSRID(ST_MakePoint($11, $12), 4326),
         $13, $14, $15, $16, $17,
-        FALSE
+        FALSE, $19
     )
     ON CONFLICT (store_id) DO NOTHING
     RETURNING id
@@ -163,6 +163,7 @@ def _to_row(game_type: str, round_no: int, item: dict) -> tuple | None:
         _yn(item.get("st10LtNtslYn")),
         _yn(item.get("st5LtNtslYn")),
         _ATMT_MAP.get(item.get("atmtPsvYn") or "", "unknown"),
+        lt_shp_id in ONLINE_SHOP_IDS,
     )
 
 

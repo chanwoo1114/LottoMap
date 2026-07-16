@@ -5,7 +5,7 @@ import httpx
 
 from app.core.database import get_pool
 from app.crawlers.common import (
-    BASE_URL, client_session, delay,
+    BASE_URL, ONLINE_SHOP_IDS, client_session, delay,
     insert_bootstrap_failure, run_retry,
 )
 from app.crawlers.regions import CTPV_MAP
@@ -30,7 +30,7 @@ INSERT INTO stores (
     sido, sigungu, dong,
     sells_lotto, sells_pension,
     sells_speetto_2000, sells_speetto_1000, sells_speetto_500,
-    location, is_active
+    location, is_active, is_online
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
     CASE
@@ -38,7 +38,7 @@ INSERT INTO stores (
         THEN ST_SetSRID(ST_MakePoint($15, $14), 4326)
         ELSE NULL
     END,
-    TRUE
+    TRUE, $16
 )
 ON CONFLICT (store_id) DO UPDATE SET
     name               = EXCLUDED.name,
@@ -54,7 +54,8 @@ ON CONFLICT (store_id) DO UPDATE SET
     sells_speetto_1000 = EXCLUDED.sells_speetto_1000,
     sells_speetto_500  = EXCLUDED.sells_speetto_500,
     location           = COALESCE(EXCLUDED.location, stores.location),
-    is_active          = TRUE
+    is_active          = TRUE,
+    is_online          = EXCLUDED.is_online
 """
 
 
@@ -69,6 +70,7 @@ def _parse_item(item: dict) -> dict | None:
 
     return {
         "store_id": str(store_id),
+        "is_online": str(store_id) in ONLINE_SHOP_IDS,
         "name": (item.get("conmNm") or "").strip(),
         "phone": item.get("shpTelno") or "",
         "address": (item.get("bplcRdnmDaddr") or "").strip(),
@@ -113,7 +115,7 @@ async def upsert_stores(stores: list[dict]) -> int:
             s["sido"], s["sigungu"], s["dong"],
             s["sells_lotto"], s["sells_pension"],
             s["sells_speetto_2000"], s["sells_speetto_1000"], s["sells_speetto_500"],
-            s["lat"], s["lng"],
+            s["lat"], s["lng"], s["is_online"],
         )
         for s in stores
     ]
