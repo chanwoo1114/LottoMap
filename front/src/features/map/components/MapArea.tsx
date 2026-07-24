@@ -21,7 +21,7 @@ export function MapArea({ containerRef, tooFar, onMyLocation }: MapAreaProps) {
         </div>
       )}
 
-      <IconButton onClick={onMyLocation} aria-label="내 위치로 이동" className="absolute bottom-6 right-4 z-10">
+      <IconButton onClick={onMyLocation} aria-label="내 위치로 이동" className="absolute bottom-20 right-4 z-10 md:bottom-6">
         <BiCurrentLocation className="h-5 w-5" />
       </IconButton>
     </div>

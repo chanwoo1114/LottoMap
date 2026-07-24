@@ -6,6 +6,7 @@ import { useKakaoMap } from './hooks/useKakaoMap'
 import { useFavorites } from '@/features/store/FavoritesContext'
 import { MapSidebar } from './components/MapSidebar'
 import { MapArea } from './components/MapArea'
+import { MobileSheet } from './components/MobileSheet'
 import { StoreDetail } from '@/features/store/components/StoreDetail'
 import { AuthModal } from '@/features/auth/components/AuthModal'
 import type { Store } from '@/features/store/api'
@@ -75,7 +76,7 @@ export function MapScreen() {
   const requireLogin = () => setAuthOpen(true)
 
   return (
-    <div className="flex h-full flex-row">
+    <div className="relative flex h-full flex-row">
       <MapSidebar
         stores={stores}
         selectedId={selectedStore?.id}
@@ -87,8 +88,9 @@ export function MapScreen() {
         onFavoriteSelect={focusFavorite}
       />
 
+      {/* 데스크톱: 상세 사이드 패널 */}
       {selectedStore && (
-        <aside className="w-96 shrink-0 border-r border-gray-200 bg-white">
+        <aside className="hidden w-96 shrink-0 border-r border-gray-200 bg-white md:block">
           <StoreDetail
             store={selectedStore}
             onClose={() => setSelectedStore(null)}
@@ -99,6 +101,18 @@ export function MapScreen() {
       )}
 
       <MapArea containerRef={containerRef} tooFar={tooFar} onMyLocation={goToMyLocation} />
+
+      {/* 모바일: 드래그 바텀시트 (peek로 등장, 핸들 드래그로 확장/닫기) */}
+      {selectedStore && (
+        <MobileSheet key={selectedStore.id} onClose={() => setSelectedStore(null)}>
+          <StoreDetail
+            store={selectedStore}
+            onClose={() => setSelectedStore(null)}
+            onShowOnMap={(s) => { panToStore(s); setSelectedStore(null) }}
+            onRequireLogin={requireLogin}
+          />
+        </MobileSheet>
+      )}
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
 

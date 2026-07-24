@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { getStoresInBounds, getFavorites, type Store } from '@/features/store/api'
 
-const MIN_LEVEL_TO_FETCH = 6
+const MAX_LAT_SPAN = 0.25   // 화면 세로 약 28km 이상 보이면 조회 중단 (기기 무관 동일 기준)
 
 function buildPin(favorite: boolean, selected: boolean): HTMLDivElement {
   const green = '#16a34a', gold = '#f59e0b'
@@ -33,13 +33,13 @@ export function useStoresInBounds(
   useEffect(() => {
     if (!map || favOpen) return
     const fetchBbox = async () => {
-      if (map.getLevel() > MIN_LEVEL_TO_FETCH) {
+      const b = map.getBounds(), sw = b.getSouthWest(), ne = b.getNorthEast()
+      if (ne.getLat() - sw.getLat() > MAX_LAT_SPAN) {
         setTooFar(true)
         setStores([])
         return
       }
       setTooFar(false)
-      const b = map.getBounds(), sw = b.getSouthWest(), ne = b.getNorthEast()
       try {
         setStores(await getStoresInBounds({
           min_lat: sw.getLat(), min_lng: sw.getLng(),
